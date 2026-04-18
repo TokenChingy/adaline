@@ -9,7 +9,7 @@ import ../algorithms/lexical_index
 import ../algorithms/rrf_merger
 import ../algorithms/reranker
 import ../../infrastructure/mmapped_storage
-import std/[tables, random]
+import std/[tables, random, times]
 
 type
   MemoryService* = object
@@ -22,6 +22,7 @@ type
     hnswEntryPoint*: uint64
     memoryIdCounter*: uint64
     textCache*: Table[uint64, string]
+    timestampCache*: Table[uint64, uint64]
 
 proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig()): MemoryService =
   randomize()
@@ -34,13 +35,15 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   result.hnswEntryPoint = 0
   result.memoryIdCounter = 0
   result.textCache = initTable[uint64, string]()
+  result.timestampCache = initTable[uint64, uint64]()
 
   # Replay WAL to rebuild in-memory indexes
   let entries = replayWal(result.storage)
-  for (memoryId, text) in entries:
+  for (memoryId, timestamp, text) in entries:
     if memoryId >= result.memoryIdCounter:
       result.memoryIdCounter = memoryId + uint64(cfg.fingerprintBytes)
     result.textCache[memoryId] = text
+    result.timestampCache[memoryId] = timestamp
     result.corpus.addMemory(text)
 
     let fpPtr = result.storage.getFingerprintPtr(memoryId)
@@ -58,10 +61,12 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
 proc insert*(service: var MemoryService; content: string): uint64 =
   let memoryId = service.memoryIdCounter
   service.memoryIdCounter += uint64(service.cfg.fingerprintBytes)
+  let timestamp = uint64(getTime().toUnix())
 
   # 1. WAL
-  discard service.storage.appendWal(memoryId, content)
+  discard service.storage.appendWal(memoryId, timestamp, content)
   service.textCache[memoryId] = content
+  service.timestampCache[memoryId] = timestamp
 
   # 2. Update corpus index
   service.corpus.addMemory(content)
@@ -109,7 +114,8 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
     candidates[i] = Memory(
       id: mid,
       content: service.textCache.getOrDefault(mid, ""),
-      score: merged[i].score
+      score: merged[i].score,
+      createdAt: service.timestampCache.getOrDefault(mid, 0)
     )
 
   # Rerank top candidates with term-coverage boost

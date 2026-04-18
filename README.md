@@ -1,6 +1,6 @@
 # Adaline
 
-A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped flat files, MinHash LSH, HNSW graph search, and a lexical sidecar with Reciprocal Rank Fusion.
+A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped flat files, MinHash Local Sensitivity Hash, Hierarchal Navigable Small World Graph Search, and a Lexical Sidecar with Reciprocal Rank Fusion, and Term Coverage Rerank.
 
 ## What Adaline Does
 
@@ -17,40 +17,40 @@ It combines both approaches to give you the best of each world.
 ## Architecture Overview
 
 ```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│  INSERT: How a memory gets stored                                           │
-│                                                                               │
-│  Text ──► Tokenize ──► SDR Encoder ──► 1280-byte Fingerprint                  │
-│                            │                                                  │
-│                            ├──► MinHash LSH Index  ("Which bucket?")          │
-│                            ├──► HNSW Graph         ("Nearest neighbors")      │
-│                            ├──► Lexical Index      ("Token → memory list")   │
-│                            └──► Corpus Index       ("How rare is each token?") │
-│                                                                               │
-│  Text + ID ──► WAL (Append-only log for crash recovery)                       │
-│  Fingerprint ──► fingerprints.bin (Memory-mapped)                             │
-│  Graph nodes ──► graph.bin (Memory-mapped)                                    │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  INSERT: How a memory gets stored                                               │
+│                                                                                 │
+│  Text ──► Tokenize ──► SDR Encoder ──► 1280-byte Fingerprint                    │
+│                            │                                                    │
+│                            ├──► MinHash LSH Index  ("Which bucket?")            │
+│                            ├──► HNSW Graph         ("Nearest neighbors")        │
+│                            ├──► Lexical Index      ("Token → memory list")      │
+│                            └──► Corpus Index       ("How rare is each token?")  │
+│                                                                                 │
+│  Text + ID ──► WAL (Append-only log for crash recovery)                         │
+│  Fingerprint ──► fingerprints.bin (Memory-mapped)                               │
+│  Graph nodes ──► graph.bin (Memory-mapped)                                      │
+└─────────────────────────────────────────────────────────────────────────────────┘
 
-┌───────────────────────────────────────────────────────────────────────────────┐
-│  SEARCH: How a query finds relevant memories                                 │
-│                                                                               │
-│  Query ──► Same SDR Encoder ──► Fingerprint                                   │
-│       │                                                                       │
-│       ├──► SEMANTIC LANE ──────────────────────────────────────────────┐      │
-│       │    MinHash LSH  ──►  Seed Candidates                           │      │
-│       │         │          │                                           │      │
-│       │         └─────────►└──► HNSW Graph Search (Layer-0 descent)    │      │
-│       │                            │                                   │      │
-│       │                            └──► Top-K by Weighted Jaccard      │      │
-│       │                                                                │      │
-│       ├──► LEXICAL LANE ───────────────────────────────────────────────┘      │
-│       │    Inverted Index Lookup + Query Likelihood Scoring                   │
-│       │                                                                       │
-│       └──► MERGE: Reciprocal Rank Fusion (RRF) Combines Both Lanes            │
-│            └──► RERANK: Boost memories containing all query terms            │
-│                 └──► Final ranked results                                     │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  SEARCH: How a query finds relevant memories                                    │
+│                                                                                 │
+│  Query ──► Same SDR Encoder ──► Fingerprint                                     │
+│       │                                                                         │
+│       ├──► SEMANTIC LANE ──────────────────────────────────────────────┐        │
+│       │    MinHash LSH  ──►  Seed Candidates                           │        │
+│       │         │          │                                           │        │
+│       │         └─────────►└──► HNSW Graph Search (Layer-0 descent)    │        │
+│       │                            │                                   │        │
+│       │                            └──► Top-K by Weighted Jaccard      │        │
+│       │                                                                │        │
+│       ├──► LEXICAL LANE ───────────────────────────────────────────────┘        │
+│       │    Inverted Index Lookup + Query Likelihood Scoring                     │
+│       │                                                                         │
+│       └──► MERGE: Reciprocal Rank Fusion (RRF) Combines Both Lanes              │
+│            └──► RERANK: Boost memories containing all query terms               │
+│                 └──► Final ranked results                                       │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---

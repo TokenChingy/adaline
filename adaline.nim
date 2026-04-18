@@ -1,4 +1,4 @@
-import std/[os, strutils, tables]
+import std/[os, strutils, tables, times]
 import domain/services/memory_service
 import domain/entities/config
 import domain/entities/memory
@@ -7,7 +7,6 @@ import use_cases/search_memories
 
 const
   AppName = "Adaline"
-  AppVersion = "0.1.0"
   DefaultDataDir = "./data"
 
 proc printUsage() =
@@ -19,54 +18,40 @@ Usage:
 
 Commands:
   insert <text>           Insert a memory (text from argument)
-  insert -                Insert a memory (text from stdin, one per line)
   search <query> [k]      Search memories (default k=10)
   stats                   Show index statistics
-  repl                    Interactive search REPL
   help                    Show this help message
-  version                 Show version
 
 Examples:
   adaline insert "The quick brown fox"
-  echo "Hello world" | adaline insert -
   adaline search "quick fox" 5
-  adaline repl
 """
-
-proc printVersion() =
-  echo AppName, " v", AppVersion
-  echo "Fingerprint: 10240 bits | HNSW + MinHash LSH + QLM Lexical"
 
 proc getDataDir(): string =
   result = getEnv("ADALINE_DATA_DIR", DefaultDataDir)
+
+proc formatTimestamp(ts: uint64): string =
+  if ts == 0: return "unknown"
+  let dt = fromUnix(int64(ts))
+  return dt.format("yyyy-MM-dd HH:mm:ss")
 
 proc cmdInsert(args: seq[string]) =
   let dataDir = getDataDir()
   let cfg = defaultEngineConfig()
   var service = initMemoryService(dataDir, cfg)
 
-  var lines: seq[string]
   if args.len == 0:
-    printUsage()
+    stderr.writeLine("Error: insert requires text argument")
     quit(1)
 
-  if args[0] == "-":
-    # Read from stdin
-    for line in stdin.lines:
-      let trimmed = line.strip()
-      if trimmed.len > 0:
-        lines.add(trimmed)
-  else:
-    lines.add(args.join(" ").strip())
-
-  if lines.len == 0:
+  let content = args.join(" ").strip()
+  if content.len == 0 or content == "-":
     stderr.writeLine("Error: no content to insert")
     quit(1)
 
-  for content in lines:
-    let output = insertMemory(service, InsertMemoryInput(content: content))
-    echo "Inserted: id=", output.memoryId, " len=", content.len
-
+  let output = insertMemory(service, InsertMemoryInput(content: content))
+  let ts = service.timestampCache.getOrDefault(output.memoryId, 0)
+  echo "Inserted: id=", output.memoryId, " at ", formatTimestamp(ts)
   echo "Total indexed: ", service.textCache.len, " memories"
 
 proc cmdSearch(args: seq[string]) =
@@ -81,7 +66,6 @@ proc cmdSearch(args: seq[string]) =
   var k = 10
   var queryTokens: seq[string]
 
-  # Parse: last arg might be a number (topK)
   for i in 0 ..< args.len:
     if i == args.len - 1 and args.len > 1:
       try:
@@ -106,12 +90,20 @@ proc cmdSearch(args: seq[string]) =
 
   for i, mem in output.memories:
     let scoreStr = formatFloat(mem.score, ffDecimal, 4)
-    echo align($(i + 1), 3), ". [", align($mem.id, 6), "]  score=", scoreStr, "  ", mem.content
+    let tsStr = formatTimestamp(mem.createdAt)
+    echo align($(i + 1), 3), ". [", align($mem.id, 6), "]  score=", scoreStr,
+             "  ", tsStr, "  ", mem.content
 
 proc cmdStats() =
   let dataDir = getDataDir()
   let cfg = defaultEngineConfig()
   var service = initMemoryService(dataDir, cfg)
+
+  var oldestTs = high(uint64)
+  var newestTs = low(uint64)
+  for mid, ts in service.timestampCache:
+    if ts < oldestTs: oldestTs = ts
+    if ts > newestTs: newestTs = ts
 
   echo "=== Adaline Index Stats ==="
   echo "Data directory: ", dataDir
@@ -119,6 +111,9 @@ proc cmdStats() =
   echo "Corpus memories:", service.corpus.numMemories
   echo "HNSW layers:    ", service.maxHnswLayer + 1
   echo "HNSW entry:     ", service.hnswEntryPoint
+  if service.timestampCache.len > 0:
+    echo "Oldest memory:  ", formatTimestamp(oldestTs)
+    echo "Newest memory:  ", formatTimestamp(newestTs)
   echo "Fingerprint:    ", cfg.fingerprintBits, " bits (", cfg.fingerprintBytes, " bytes)"
   echo "  Tokens:       ", cfg.tokenBits, " bits"
   echo "  Bigrams:      ", cfg.bigramBits, " bits"
@@ -128,33 +123,6 @@ proc cmdStats() =
   echo "HNSW efSearch:  ", cfg.hnswEfSearch
   echo "RRF k:          ", cfg.rrfK
   echo "Dirichlet mu:   ", cfg.dirichletMu
-
-proc cmdRepl() =
-  let dataDir = getDataDir()
-  let cfg = defaultEngineConfig()
-  var service = initMemoryService(dataDir, cfg)
-
-  echo "=== Adaline Interactive REPL ==="
-  echo "Type a query to search. Empty line quits."
-  echo "Memories indexed: ", service.textCache.len
-  echo ""
-
-  while true:
-    stdout.write("adaline> ")
-    stdout.flushFile()
-    var line: string
-    if not stdin.readLine(line):
-      break
-    let query = line.strip()
-    if query.len == 0:
-      break
-
-    let output = searchMemories(service, SearchMemoriesInput(query: query, topK: 10))
-    echo "Results: ", output.memories.len
-    for i, mem in output.memories:
-      let scoreStr = formatFloat(mem.score, ffDecimal, 4)
-      echo "  ", align($(i + 1), 2), ". [", $mem.id, "] ", scoreStr, "  ", mem.content
-    echo ""
 
 proc main() =
   let args = commandLineParams()
@@ -173,12 +141,8 @@ proc main() =
     cmdSearch(rest)
   of "stats":
     cmdStats()
-  of "repl":
-    cmdRepl()
   of "help", "--help", "-h":
     printUsage()
-  of "version", "--version", "-v":
-    printVersion()
   else:
     stderr.writeLine("Unknown command: ", cmd)
     printUsage()

@@ -87,31 +87,35 @@ proc initStorage*(dataDir: string): MmappedStorage =
   result.graphMem = result.graphMemFile.mem
   result.graphCapacity = graphSize div uint64(sizeof(HnswNode))
 
-proc appendWal*(storage: MmappedStorage; memoryId: uint64; text: string): uint64 =
+proc appendWal*(storage: MmappedStorage; memoryId: uint64; timestamp: uint64; text: string): uint64 =
   result = storage.walSize
   var textLen = uint32(text.len)
   discard storage.walFile.writeBuffer(unsafeAddr memoryId, sizeof(uint64))
+  discard storage.walFile.writeBuffer(unsafeAddr timestamp, sizeof(uint64))
   discard storage.walFile.writeBuffer(unsafeAddr textLen, sizeof(uint32))
   storage.walFile.write(text)
   storage.walFile.flushFile()
-  storage.walSize += uint64(sizeof(uint64) + sizeof(uint32) + text.len)
+  storage.walSize += uint64(sizeof(uint64) + sizeof(uint64) + sizeof(uint32) + text.len)
 
-proc replayWal*(storage: MmappedStorage): seq[tuple[memoryId: uint64, text: string]] =
+proc replayWal*(storage: MmappedStorage): seq[tuple[memoryId: uint64, timestamp: uint64, text: string]] =
   let walPath = storage.dataDir / "wal.bin"
   if not fileExists(walPath) or getFileSize(walPath) == 0:
     return
   var f = system.open(walPath, fmRead)
   while true:
     var memoryId: uint64
+    var timestamp: uint64
     var textLen: uint32
     if f.readBuffer(addr memoryId, sizeof(uint64)) != sizeof(uint64):
+      break
+    if f.readBuffer(addr timestamp, sizeof(uint64)) != sizeof(uint64):
       break
     if f.readBuffer(addr textLen, sizeof(uint32)) != sizeof(uint32):
       break
     var text = newString(int(textLen))
     if f.readBuffer(addr text[0], int(textLen)) != int(textLen):
       break
-    result.add((memoryId, text))
+    result.add((memoryId, timestamp, text))
   f.close()
 
 proc getFingerprintPtr*(storage: MmappedStorage; memoryId: uint64): ptr Fingerprint =
