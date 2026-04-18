@@ -40,6 +40,9 @@ type
     # Reranker
     rerankCoverageWeight*: float
 
+    # Chunking threshold (0.0–1.0); chunk when any block exceeds this saturation
+    chunkSaturationThreshold*: float
+
 proc defaultEngineConfig*(): EngineConfig =
   result = EngineConfig(
     fingerprintBytes: 1280,
@@ -63,5 +66,6 @@ proc defaultEngineConfig*(): EngineConfig =
     hnswEfSearch: 64,
     dirichletMu: 2000.0,
     rrfK: 60,
-    rerankCoverageWeight: 0.5
+    rerankCoverageWeight: 0.5,
+    chunkSaturationThreshold: 0.6
   )

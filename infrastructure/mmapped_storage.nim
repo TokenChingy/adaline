@@ -17,6 +17,8 @@ type
     graphMemFile*: MemFile
     graphMem*: pointer
     graphCapacity*: uint64
+    chunksFile*: File
+    chunksSize*: uint64
 
 proc extendFile(path: string; newSize: uint64) =
   var f = system.open(path, fmReadWrite)
@@ -87,6 +89,11 @@ proc initStorage*(dataDir: string): MmappedStorage =
   result.graphMem = result.graphMemFile.mem
   result.graphCapacity = graphSize div uint64(sizeof(HnswNode))
 
+  # Chunk mapping file (append-only, flat array of (parentId, chunkId) pairs)
+  let chunksPath = dataDir / "chunks.bin"
+  result.chunksFile = system.open(chunksPath, fmAppend)
+  result.chunksSize = uint64(getFileSize(chunksPath))
+
 proc appendWal*(storage: MmappedStorage; memoryId: uint64; timestamp: uint64; text: string): uint64 =
   result = storage.walSize
   var textLen = uint32(text.len)
@@ -116,6 +123,28 @@ proc replayWal*(storage: MmappedStorage): seq[tuple[memoryId: uint64, timestamp:
     if f.readBuffer(addr text[0], int(textLen)) != int(textLen):
       break
     result.add((memoryId, timestamp, text))
+  f.close()
+
+proc appendChunkMapping*(storage: MmappedStorage; parentMemoryId: uint64; chunkId: uint64): uint64 =
+  result = storage.chunksSize
+  discard storage.chunksFile.writeBuffer(unsafeAddr parentMemoryId, sizeof(uint64))
+  discard storage.chunksFile.writeBuffer(unsafeAddr chunkId, sizeof(uint64))
+  storage.chunksFile.flushFile()
+  storage.chunksSize += uint64(sizeof(uint64) + sizeof(uint64))
+
+proc replayChunks*(storage: MmappedStorage): seq[tuple[parentMemoryId: uint64, chunkId: uint64]] =
+  let chunksPath = storage.dataDir / "chunks.bin"
+  if not fileExists(chunksPath) or getFileSize(chunksPath) == 0:
+    return
+  var f = system.open(chunksPath, fmRead)
+  while true:
+    var parentMemoryId: uint64
+    var chunkId: uint64
+    if f.readBuffer(addr parentMemoryId, sizeof(uint64)) != sizeof(uint64):
+      break
+    if f.readBuffer(addr chunkId, sizeof(uint64)) != sizeof(uint64):
+      break
+    result.add((parentMemoryId, chunkId))
   f.close()
 
 proc getFingerprintPtr*(storage: MmappedStorage; memoryId: uint64): ptr Fingerprint =
