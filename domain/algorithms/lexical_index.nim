@@ -27,29 +27,6 @@ proc addMemory*(index: var LexicalIndex; memoryId: uint64; text: string) =
     index.postings.mgetOrPut(term, @[]).add((memoryId, uint32(freq)))
     index.corpusTermFreqs.mgetOrPut(term, 0'u64) += uint64(freq)
 
-proc scoreMemory*(index: LexicalIndex; query: string; memoryId: uint64): float =
-  let qTokens = tokenize(query)
-  let memLen = float(index.memLengths.getOrDefault(memoryId, 0))
-  let mu = index.mu
-
-  result = 0.0
-  for token in qTokens:
-    let corpusFreq = index.corpusTermFreqs.getOrDefault(token, 0'u64)
-    if corpusFreq == 0 or index.totalCorpusTokens == 0:
-      continue
-    let pqc = float(corpusFreq) / float(index.totalCorpusTokens)
-
-    var tf = 0'u32
-    if index.postings.hasKey(token):
-      for (mid, freq) in index.postings[token]:
-        if mid == memoryId:
-          tf = freq
-          break
-
-    result += ln(1.0 + float(tf) / (mu * pqc))
-
-  result += float(qTokens.len) * ln(mu / (memLen + mu))
-
 proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memoryId: uint64, score: float]] =
   let qTokens = tokenize(query)
   var docScores = initTable[uint64, float]()

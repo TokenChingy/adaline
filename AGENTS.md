@@ -23,7 +23,7 @@ domain/algorithms/  <- The math:
 domain/services/    <- Pure domain orchestration (MemoryService).
 infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        graph store). Domain code has no knowledge of this layer.
-cli.nim             <- The CLI entry point.
+adaline.nim         <- The CLI entry point.
 ```
 
 ## Design constraints

@@ -140,9 +140,3 @@ proc ensureGraphCapacity*(storage: MmappedStorage; memoryId: uint64) =
   if idx >= storage.graphCapacity:
     storage.growGraphStore(idx + 1)
 
-proc writeHnswNode*(storage: MmappedStorage; memoryId: uint64; node: HnswNode) =
-  storage.ensureGraphCapacity(memoryId)
-  let idx = memoryId div uint64(FingerprintBytes)
-  let offset = idx * uint64(sizeof(HnswNode))
-  copyMem(cast[pointer](cast[uint](storage.graphMem) + uint(offset)),
-          unsafeAddr node, sizeof(HnswNode))

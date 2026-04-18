@@ -219,7 +219,7 @@ To run:
 ## Methodology Notes
 
 - **Distance metric**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
-- **Search path**: LSH seeds → HNSW layer-0 descent (efSearch=64). No brute-force fallback.
+- **Search path**: LSH seeds → HNSW layer-0 descent (efSearch=64).
 - **Lexical scoring**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
 - **Fusion**: Reciprocal Rank Fusion (k=60).
 - **Reranking**: Term-coverage boost (weight=0.5) applied to top-K merged results.

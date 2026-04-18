@@ -30,6 +30,7 @@ build/
 Thumbs.db
 
 # Benchmark data
+benchmarks/data/*
 benchmarks/scifact.zip
 benchmarks/nfcorpus.zip
 

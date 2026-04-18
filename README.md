@@ -293,7 +293,7 @@ For each candidate:
 
 | File | Purpose | Format |
 |------|---------|--------|
-| `data/wal.bin` | Append-only text + metadata | `[MemoryID: u64][len: u32][text: bytes]` |
+| `data/wal.bin` | Append-only text + metadata | `[MemoryID: u64][timestamp: u64][len: u32][text: bytes]` |
 | `data/fingerprints.bin` | Flat fingerprint array | 1280 bytes per fingerprint |
 | `data/graph.bin` | Flat HNSW node array | 2056 bytes per node |
 
@@ -314,19 +314,30 @@ nim c -d:release adaline.nim
 # Search
 ./adaline search "quick fox" 5
 
-# Interactive REPL
-./adaline repl
-
 # Show index stats
 ./adaline stats
 
 # Run tests
 nim c -r tests/domain/test_fingerprint.nim
+nim c -r tests/domain/test_sdr_encoder.nim
+nim c -r tests/domain/test_corpus_index.nim
+nim c -r tests/domain/test_hnsw_node.nim
+nim c -r tests/domain/test_lexical_index.nim
+nim c -r tests/domain/test_minhash_lsh.nim
+nim c -r tests/domain/test_reranker.nim
+nim c -r tests/domain/test_rrf_merger.nim
+nim c -r tests/domain/test_weighted_jaccard.nim
 nim c -r tests/domain/test_memory_service.nim
+nim c -r tests/use_cases/test_insert_memory.nim
 nim c -r tests/use_cases/test_search_memories.nim
 
 # Run BEIR benchmarks
 nim c -d:release benchmarks/benchmark_beir.nim
 ./benchmarks/benchmark_beir scifact
 ./benchmarks/benchmark_beir nfcorpus
+
+# Run LongMemEval benchmark
+python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='xiaowu0162/longmemeval-cleaned', filename='longmemeval_s_cleaned.json', repo_type='dataset', local_dir='benchmarks/data')"
+nim c -d:release benchmarks/benchmark_longmemeval.nim
+./benchmarks/benchmark_longmemeval
 ```
