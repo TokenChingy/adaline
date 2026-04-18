@@ -2,108 +2,292 @@
 
 A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped flat files, MinHash LSH, HNSW graph search, and a lexical sidecar with Reciprocal Rank Fusion.
 
+## What Adaline Does
+
+Adaline turns text into **Sparse Distributed Representations** — fixed-size 10240-bit bitmaps called **fingerprints**. Two pieces of text with similar meaning will have fingerprints that overlap significantly. This lets you search by semantic similarity, not just exact word matching.
+
+Think of it like this:
+- **Traditional search** asks "which documents contain these exact words?"
+- **Adaline search** asks "which documents have fingerprints that look like this query's fingerprint?"
+
+It combines both approaches to give you the best of each world.
+
+---
+
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Insert Flow                                                                │
+│  INSERT: How a document gets stored                                         │
 │                                                                             │
-│  Input Text ──► SDR Encoder ──► Fingerprint Store (mmap)                    │
-│       │              │                                                      │
-│       │              └──► MinHash LSH Index (in-memory)                     │
-│       │              └──► HNSW Graph (mmap)                                 │
-│       │              └──► Lexical Index (in-memory)                         │
-│       │                                                                     │
-│       └──► WAL (append-only binary, mmap-backed)                            │
+│  Text ──► Tokenize ──► SDR Encoder ──► 1280-byte Fingerprint                │
+│                            │                                                │
+│                            ├──► MinHash LSH Index  ("which bucket?")        │
+│                            ├──► HNSW Graph         ("nearest neighbors")    │
+│                            ├──► Lexical Index      ("word → document list") │
+│                            └──► Corpus Index       ("how rare is each word?")│
+│                                                                             │
+│  Text + ID ──► WAL (append-only log for crash recovery)                     │
+│  Fingerprint ──► fingerprints.bin (memory-mapped)                           │
+│  Graph nodes ──► graph.bin (memory-mapped)                                  │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Search Flow                                                                │
+│  SEARCH: How a query finds relevant documents                               │
 │                                                                             │
-│  Query ──► SDR Encoder ──► MinHash LSH ──► Candidate Seeds                  │
-│       │                         │                                           │
-│       │                         └──► HNSW Graph Search (layer-0 descent)    │
-│       │                                         │                           │
-│       │                                         └──► Top-K Semantic         │
+│  Query ──► Same SDR Encoder ──► Fingerprint                                 │
 │       │                                                                     │
-│       └──► Lexical Index (QLM + Dirichlet) ──► Top-K Lexical                │
-│                                                                             │
-│                          RRF Merge ──► Term-Coverage Rerank ──► Final       │
+│       ├──► SEMANTIC LANE ─────────────────────────────────────────────┐     │
+│       │    MinHash LSH  ──►  Seed candidates                           │     │
+│       │         │          │                                           │     │
+│       │         └─────────►└──► HNSW Graph search (layer-0 descent)     │     │
+│       │                            │                                   │     │
+│       │                            └──► Top-K by weighted Jaccard     │     │
+│       │                                                                │     │
+│       ├──► LEXICAL LANE ──────────────────────────────────────────────┘     │
+│       │    Inverted index lookup + Query Likelihood scoring                 │
+│       │                                                                     │
+│       └──► MERGE: Reciprocal Rank Fusion (RRF) combines both lanes          │
+│            └──► RERANK: Boost documents containing all query terms          │
+│                 └──► Final ranked results                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+---
+
 ## Insert Flow (Step-by-Step)
 
-1. **WAL Append**
-   - The raw text and a `uint64` MemoryID are appended to `wal.bin`.
-   - MemoryID equals the byte offset in the fingerprint store (multiples of 1280).
+### Step 0: What is a fingerprint?
 
-2. **Corpus Index Update**
-   - Term document frequencies are updated incrementally.
-   - IDF values are recomputed for seen terms.
+Before anything else, understand the destination. Every document becomes a **fingerprint**: a 10240-bit bitmap (1280 bytes) split into three blocks:
 
-3. **SDR Encoding**
-   - Text is lowercased and tokenized.
-   - **Block A (Tokens, 4096 bits):** Each token is hashed to `scaledProbes` positions based on its IDF. Token bigrams (adjacent word pairs) are also hashed here.
-   - **Block B (Character Bigrams, 3072 bits):** A 2-character sliding window hashes to positions. Only letter/digit pairs are kept.
-   - **Block C (XOR Context, 3072 bits):** For each token, its hash is XOR-folded with its left and right neighbor hashes, then probed.
-   - Probe counts scale with rarity: rare terms get more probes, common terms get fewer.
+| Block | Size | Stores | Why |
+|-------|------|--------|-----|
+| A | 4096 bits | Tokens + token bigrams | "What words are in here?" |
+| B | 3072 bits | Character bigrams | "What does it *spell* like?" |
+| C | 3072 bits | XOR neighbor context | "What words are next to each other?" |
 
-4. **Fingerprint Store Write**
-   - The 1280-byte fingerprint is written to `fingerprints.bin` at offset `MemoryID` via `mmap`.
+Each feature (word, bigram, etc.) is hashed to one or more bit positions. Two documents sharing many features will have overlapping bits — we measure this overlap with **Jaccard similarity**.
 
-5. **MinHash LSH Insert**
-   - 100 independent MinHash values are computed from active bit positions.
-   - The signature is divided into 25 bands of 4 rows.
-   - Each band is hashed to a bucket; `MemoryID` is appended to that bucket.
+---
 
-6. **Lexical Index Insert**
-   - Tokens are counted per document.
-   - The inverted index adds `(MemoryID, frequency)` to each token's postings list.
-   - Corpus-wide term frequencies and total token count are updated.
+### Step 1: Write-Ahead Log (WAL)
 
-7. **HNSW Graph Insert**
-   - A random level is assigned (exponential decay, max 7).
-   - The graph store (`graph.bin`) is grown if needed.
-   - For layers above the target layer, greedy descent finds the closest neighbor.
-   - At each target layer, `efConstruction=200` nearest neighbors are found.
-   - Bidirectional edges are created and pruned to `maxNeighbors=32` per layer.
+The raw text and a `uint64` MemoryID are appended to `wal.bin` as binary:
+```
+[MemoryID: 8 bytes][textLength: 4 bytes][text: N bytes]
+```
+
+**Why:** If the process crashes after writing the WAL but before updating indexes, the WAL can be replayed on restart to rebuild everything. The MemoryID is also the byte offset in the fingerprint store (multiples of 1280), so lookup is O(1).
+
+---
+
+### Step 2: Update the Corpus Index
+
+The document's unique words are counted. From these counts we compute **IDF** (Inverse Document Frequency):
+
+```
+IDF(word) = ln(totalDocuments / documentsContaining(word))
+```
+
+**What it means:** A word that appears in every document has IDF ≈ 0 (useless for distinguishing documents). A word that appears in only one document has a high IDF (very distinctive).
+
+This IDF table is used in the next step to decide how strongly each word should be represented in the fingerprint.
+
+---
+
+### Step 3: SDR Encoding — Turning Text into a Fingerprint
+
+The text is lowercased and broken into tokens (words). Then three parallel encoders run:
+
+#### Block A: Tokens (4096 bits)
+Each unique token is hashed to bit positions in the first 4096 bits. But here's the key trick: **rare words get more bits; common words get fewer**.
+
+This is controlled by `scaledProbes`:
+```
+probes = baseProbes × (IDF(word) / maxIDF)²
+```
+
+For example, with `baseProbes = 4`:
+- "the" (appears everywhere, IDF ≈ 0) → 1 probe (clamped minimum)
+- "quick" (moderately common) → 1–2 probes
+- "adaline" (rare, distinctive) → 4 probes
+
+Token bigrams (adjacent pairs like "quick_brown") are also encoded here with their own `baseProbes = 2`.
+
+**Why scale by IDF?** If "the" and "adaline" both set 4 bits, "the" would drown out meaningful matches because it appears in nearly every document. Scaling gives rare, informative terms a stronger voice.
+
+#### Block B: Character Bigrams (3072 bits)
+A sliding 2-character window runs over the text. Each pair like `qu`, `ui`, `ic` is hashed to positions 4096–7167. Only letter/digit pairs are kept.
+
+**Why:** This captures spelling, morphology, and typo resilience. "color" and "colour" share many character bigrams even though their tokens differ.
+
+#### Block C: XOR Context (3072 bits)
+For each token, its hash is XOR'd with its left neighbor's hash and its right neighbor's hash. These XOR values are hashed to positions 7168–10239.
+
+**Why:** This captures local word order. "bank river" and "river bank" have identical token sets but different contexts. The XOR binds each word to its neighbors, distinguishing word order and collocations.
+
+---
+
+### Step 4: Write Fingerprint to Storage
+
+The 1280-byte fingerprint is written to `fingerprints.bin` at offset `MemoryID` via memory-mapped I/O. No `seek` + `write` syscall — just a memory copy.
+
+---
+
+### Step 5: MinHash LSH Insert
+
+Now we need a fast way to find "fingerprints that probably overlap with this one." We use **MinHash LSH** (Locality Sensitive Hashing).
+
+**How MinHash works:**
+1. Take the 10240-bit fingerprint and imagine 100 different hash functions looking at it.
+2. For each hash function, find the first `1` bit it encounters. This gives 100 numbers.
+3. Group those 100 numbers into 25 **bands** of 4 **rows** each.
+4. Hash each band to a bucket ID. If two fingerprints share even one band hash, they're probably similar.
+
+The `MemoryID` is appended to each of the 25 bucket lists.
+
+**Analogy:** Imagine 100 people each pick the first red door they see in a building. You group their answers into 25 teams of 4. If two buildings produce the same answer for even one team, the buildings are probably very similar. You only need to compare buildings that share a team answer — a massive shortcut.
+
+---
+
+### Step 6: Lexical Index Insert
+
+While the fingerprint captures meaning, words themselves still matter. We build an inverted index:
+
+```
+"quick" → [(MemoryID=0, freq=1), (MemoryID=1280, freq=2), ...]
+"fox"   → [(MemoryID=0, freq=1), ...]
+```
+
+We also track:
+- How many tokens each document has (`docLengths`)
+- How often each word appears across the entire corpus (`corpusTermFreqs`)
+- Total tokens in the corpus (`totalCorpusTokens`)
+
+This supports **Query Likelihood Model (QLM)** scoring at search time.
+
+---
+
+### Step 7: HNSW Graph Insert
+
+The HNSW (Hierarchical Navigable Small World) graph is a multi-layer structure for approximate nearest neighbor search.
+
+**How HNSW works:**
+- Each document becomes a **node** in the graph.
+- A random layer is assigned with exponential decay: most nodes live at layer 0, fewer at layer 1, very few at layer 7.
+- Layer 0 is the densest — every node connects to its nearest neighbors.
+- Higher layers are sparser — they act as "expressways" for fast traversal.
+
+**Insertion process:**
+1. Assign a random target layer (0–7).
+2. Start at the global entry point (highest layer).
+3. At each layer above the target: greedily walk to the closest neighbor.
+4. At the target layer and below: find the `efConstruction=200` nearest neighbors.
+5. Connect bidirectionally, but prune each node to `maxNeighbors=32` closest edges.
+
+**Analogy:** HNSW is like a road network. Layer 7 is an interstate (few exits, fast travel). Layer 0 is local streets (many connections, precise arrival). You take the interstate as far as possible, then exit to progressively smaller roads until you reach your exact destination.
+
+---
 
 ## Search Flow (Step-by-Step)
 
-1. **Query Encoding**
-   - The query text runs through the same SDR encoder with IDF scaling.
+### Step 1: Encode the Query
 
-2. **MinHash LSH Query**
-   - The query's MinHash signature is banded and hashed.
-   - Any bucket that shares a band hash with the query returns its MemoryIDs.
-   - Results are deduplicated.
+The query text goes through the **exact same SDR encoder** as documents. It produces a 10240-bit query fingerprint using the same IDF values from the corpus.
 
-3. **LSH Wormhole (Semantic Search)**
-   - Hash the query through MinHash LSH to retrieve seed MemoryIDs.
-   - Drop those seeds into the HNSW graph's lower layers.
-   - Execute greedy search outward (`efSearch=64`) to find local optimums.
-   - LSH seeds are scored directly and merged with HNSW results.
-   - Distance metric: `1.0 - weightedJaccard`.
+**Why the same encoder?** So query fingerprints and document fingerprints speak the same language. If a query and document share meaning, their bit patterns will overlap.
 
-4. **Lexical Search**
-   - Query tokens are looked up in the inverted index.
-   - Documents are scored using Query Likelihood with Dirichlet smoothing:
-     ```
-     Score = sum_q ln(1 + TF(q,D) / (mu * P(q|Corpus))) + |Q| * ln(mu / (|D| + mu))
-     ```
-   - The accumulator iterates postings directly (no nested per-document lookups).
+---
 
-5. **RRF Merge**
-   - Semantic top-K and lexical top-K are merged via Reciprocal Rank Fusion:
-     ```
-     RRF = 1/(60 + rank_semantic) + 1/(60 + rank_lexical)
-     ```
+### Step 2: Semantic Search — The "LSH Wormhole"
 
-6. **Term-Coverage Rerank**
-   - Each candidate document is tokenized and checked for exact query term coverage.
-   - A coverage boost (`coverageRatio * 0.5`) is added to the RRF score.
-   - Results are re-sorted by the boosted score descending.
+We need to find documents whose fingerprints are similar to the query fingerprint. We do this in two phases:
+
+#### Phase A: MinHash LSH Query
+1. Compute the query's 100 MinHash values (same as during insert).
+2. Band and hash them into 25 buckets.
+3. Collect all `MemoryID`s stored in any matching bucket.
+4. Deduplicate.
+
+These are **seed candidates** — documents that are *probably* similar. This is extremely fast because we're just doing 25 hash table lookups.
+
+#### Phase B: HNSW Graph Descent
+Here's the "Wormhole" part: instead of starting HNSW search from the global entry point, we **drop the LSH seeds directly into layer 0** and search outward from there.
+
+Why? On small datasets, HNSW search from the top can miss local clusters. The LSH seeds act as teleportation points — they drop you right next to promising candidates.
+
+**Search process:**
+1. Start from each LSH seed at layer 0 (or the global entry point if no seeds exist).
+2. Greedily walk to neighbors with highest Jaccard overlap until no improvement.
+3. Use a beam width of `efSearch=64` — keep the 64 best candidates at each step.
+4. Score candidates by **weighted Jaccard**: tokens, bigrams, and context blocks each contribute differently (50%, 25%, 25%).
+5. Return the top-K by `1.0 - weightedJaccard` (treated as distance).
+
+---
+
+### Step 3: Lexical Search
+
+Independently, we run a traditional word-based search:
+
+1. Tokenize the query.
+2. For each query token, look up its postings list in the inverted index.
+3. Score each document using **Query Likelihood with Dirichlet smoothing**:
+
+```
+Score = Σ_q ln(1 + TF(q,D) / (μ × P(q|Corpus))) + |Q| × ln(μ / (|D| + μ))
+```
+
+**What this means in plain English:**
+- `TF(q,D)` = how many times word `q` appears in document `D`
+- `P(q|Corpus)` = how common word `q` is across all documents
+- `μ = 2000` = smoothing parameter (prevents zero probabilities for unseen words)
+- Documents that contain many query words, especially rare ones, score higher.
+- Longer documents are slightly penalized.
+
+The key optimization: we iterate postings lists directly and accumulate scores in a hash table. No nested per-document lookups.
+
+---
+
+### Step 4: RRF Merge — Combining Semantic and Lexical
+
+Now we have two ranked lists:
+- **Semantic top-K**: documents that *mean* similar things (from HNSW + LSH)
+- **Lexical top-K**: documents that *contain* similar words (from inverted index)
+
+We merge them with **Reciprocal Rank Fusion (RRF)**:
+
+```
+RRF_score = 1/(60 + rank_semantic) + 1/(60 + rank_lexical)
+```
+
+**Why RRF?**
+- It's simple and parameter-light (just one constant, `k=60`).
+- A document that ranks well in *both* lanes gets a big boost.
+- A document that only appears in one lane can still surface if it ranks very highly there.
+- No training required — it works out of the box.
+
+**Analogy:** Imagine two friends recommending restaurants. One knows your taste (semantic), the other knows what's on the menu (lexical). RRF says: if both friends recommend the same place, it's probably great. If only one recommends it, it might still be worth trying if they ranked it #1.
+
+---
+
+### Step 5: Term-Coverage Rerank
+
+After RRF merging, we apply a final reranker that boosts documents containing **all query terms**.
+
+For each candidate:
+1. Tokenize the query and the document.
+2. Count how many query terms appear in the document.
+3. `coverageRatio = matchedTerms / totalQueryTerms`
+4. `bonus = coverageRatio × 0.5`
+5. If the exact query phrase appears: extra `+0.10` bonus.
+6. If any adjacent query bigram appears: extra `+0.05` bonus.
+7. `finalScore = RRF_score × (1.0 + bonus)`
+8. Re-sort by final score descending.
+
+**Why:** The semantic and lexical scores can both be fooled by partial matches. A document about "fast dogs" might score well for "quick fox" semantically, and a document with "quick" 50 times might score well lexically. The reranker pushes documents that actually contain all the query words to the top.
+
+---
 
 ## Storage Layout
 
@@ -115,17 +299,34 @@ A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped fl
 
 All stores are memory-mapped via `mmap` for zero-copy reads.
 
+---
+
 ## Building & Testing
 
 ```bash
-# Run CLI demo
-nim c -d:release cli.nim && ./cli
+# Build CLI
+nim c -d:release adaline.nim
+
+# Insert memories
+./adaline insert "The quick brown fox"
+./adaline insert "Nim is a systems programming language"
+
+# Search
+./adaline search "quick fox" 5
+
+# Interactive REPL
+./adaline repl
+
+# Show index stats
+./adaline stats
 
 # Run tests
 nim c -r tests/domain/test_fingerprint.nim
 nim c -r tests/domain/test_memory_service.nim
 nim c -r tests/use_cases/test_search_memories.nim
 
-# Run BEIR benchmark
-nim c -d:release benchmarks/benchmark_beir.nim && ./benchmarks/benchmark_beir
+# Run BEIR benchmarks
+nim c -d:release benchmarks/benchmark_beir.nim
+./benchmarks/benchmark_beir scifact
+./benchmarks/benchmark_beir nfcorpus
 ```
