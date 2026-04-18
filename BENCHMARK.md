@@ -17,6 +17,8 @@ nim c -d:release benchmarks/benchmark_beir.nim
 
 ## Running Benchmarks
 
+### BEIR
+
 ```bash
 # SciFact (~5K docs, fast)
 ./benchmarks/benchmark_beir scifact
@@ -29,6 +31,17 @@ nim c -d:release benchmarks/benchmark_beir.nim
 ```
 
 Datasets are auto-downloaded on first run and cached in `benchmarks/<name>/`.
+
+### LongMemEval
+
+```bash
+# Download dataset first
+python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='xiaowu0162/longmemeval-cleaned', filename='longmemeval_s_cleaned.json', repo_type='dataset', local_dir='benchmarks/data')"
+
+# Run retrieval benchmark
+nim c -d:release benchmarks/benchmark_longmemeval.nim
+./benchmarks/benchmark_longmemeval
+```
 
 ---
 
@@ -135,6 +148,47 @@ Datasets are auto-downloaded on first run and cached in `benchmarks/<name>/`.
 - **Precision@1 of 40%** means the top result is relevant 40% of the time. This suggests the semantic+lexical fusion works well for high-confidence matches even when overall recall is limited by sparse labels.
 - **Query throughput is higher** than SciFact (329 vs 169 q/s) because NFCorpus has fewer documents. HNSW search time scales sub-linearly with corpus size.
 - **The low MAP (0.12)** reflects the difficulty of the dataset more than the engine. NFCorpus is known to be challenging for sparse retrieval methods.
+
+---
+
+## Results: LongMemEval-S
+
+LongMemEval-S tests long-term conversational memory retrieval. Each of the 500 questions has its own haystack of ~53 conversation sessions (~115K tokens total). The benchmark evaluates whether the correct session is retrieved when searching with the question.
+
+| Metric | Value |
+|--------|-------|
+| Questions | 500 |
+| Avg sessions per question | ~53 |
+| Avg tokens per question | ~115,000 |
+
+### Retrieval Quality
+
+| Metric | Value |
+|--------|-------|
+| R@1 | 78.60% |
+| R@5 | 91.60% |
+| R@10 | 93.00% |
+
+### Per-Category R@5
+
+| Category | R@5 | Count |
+|----------|-----|-------|
+| knowledge-update | 98.72% | 77/78 |
+| single-session-assistant | 98.21% | 55/56 |
+| single-session-user | 95.71% | 67/70 |
+| multi-session | 93.23% | 124/133 |
+| temporal-reasoning | 90.98% | 121/133 |
+| single-session-preference | 46.67% | 14/30 |
+
+### Observations
+
+- **R@5 of 91.6%** is excellent for a pure sparse retrieval system. The correct session is in the top 5 for over 9 out of 10 questions.
+- **R@1 of 78.6%** means Adaline finds the exact right session first ~79% of the time without any LLM re-ranking.
+- **Knowledge updates and single-session recall are nearly perfect** (>95%). These are the easiest categories — the answer is directly stated in one session.
+- **Multi-session reasoning at 93.2%** is surprisingly strong. Adaline's partitioned SDR (tokens + bigrams + XOR context) captures enough semantic signal to retrieve sessions that contain distributed facts.
+- **Temporal reasoning at 91.0%** is also strong. Even though Adaline has no explicit date parsing, the lexical index picks up temporal references and the semantic fingerprint captures event sequences.
+- **Single-session preference is the weak spot at 46.7%.** Preferences are often implicit or indirectly stated ("I don't like spicy food" vs "the food was too spicy"). These require inference beyond literal text matching, which is harder for sparse fingerprints without an LLM reader.
+- **Comparison to other systems:** Published LongMemEval retrieval scores (R@5) for other systems range from ~85% (BM25) to ~96% (vector search with all-MiniLM-L6-v2). Adaline's 91.6% sits squarely in the competitive range, despite using no neural embeddings at all.
 
 ---
 
