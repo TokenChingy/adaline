@@ -200,9 +200,11 @@ proc main() =
 
   echo "\nRecall Metrics:"
   echo "  Recall@1:  ", formatFloat(computeRecall(allResults, qrels, 1), ffDecimal, 4)
+  echo "  Recall@5:  ", formatFloat(computeRecall(allResults, qrels, 5), ffDecimal, 4)
   echo "  Recall@10: ", formatFloat(computeRecall(allResults, qrels, 10), ffDecimal, 4)
   echo "  Recall@100:", formatFloat(computeRecall(allResults, qrels, 100), ffDecimal, 4)
   echo "  Precision@1:  ", formatFloat(computePrecision(allResults, qrels, 1), ffDecimal, 4)
+  echo "  Precision@5:  ", formatFloat(computePrecision(allResults, qrels, 5), ffDecimal, 4)
   echo "  Precision@10: ", formatFloat(computePrecision(allResults, qrels, 10), ffDecimal, 4)
   echo "  Precision@100:", formatFloat(computePrecision(allResults, qrels, 100), ffDecimal, 4)
   echo "  MRR:       ", formatFloat(computeMrr(allResults, qrels), ffDecimal, 4)
