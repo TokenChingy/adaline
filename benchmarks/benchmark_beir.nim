@@ -2,23 +2,35 @@ import std/[os, strutils, json, times, tables, sets, sequtils, algorithm, math]
 import ../domain/services/memory_service
 import ../domain/entities/config
 
-const datasetUrl = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip"
-const dataDir = "benchmarks/scifact"
-const zipPath = "benchmarks/scifact.zip"
+const
+  BeirBaseUrl = "https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets"
+  DefaultDataset = "scifact"
 
-proc ensureDataset() =
-  if dirExists(dataDir): return
-  echo "Downloading SciFact dataset..."
-  let wgetCmd = "wget -q -O " & zipPath & " " & datasetUrl
-  let curlCmd = "curl -L -o " & zipPath & " " & datasetUrl
+proc datasetUrl(name: string): string =
+  BeirBaseUrl & "/" & name & ".zip"
+
+proc datasetDir(name: string): string =
+  "benchmarks/" & name
+
+proc zipPath(name: string): string =
+  "benchmarks/" & name & ".zip"
+
+proc ensureDataset(name: string) =
+  let dir = datasetDir(name)
+  if dirExists(dir): return
+  echo "Downloading ", name, " dataset..."
+  let url = datasetUrl(name)
+  let zip = zipPath(name)
+  let wgetCmd = "wget -q -O " & zip & " " & url
+  let curlCmd = "curl -L -o " & zip & " " & url
   if execShellCmd(wgetCmd) != 0:
     if execShellCmd(curlCmd) != 0:
-      raise newException(IOError, "Failed to download dataset")
+      raise newException(IOError, "Failed to download dataset: " & name)
   echo "Extracting dataset..."
-  if execShellCmd("unzip -q -o " & zipPath & " -d benchmarks/") != 0:
-    raise newException(IOError, "Failed to extract dataset")
+  if execShellCmd("unzip -q -o " & zip & " -d benchmarks/") != 0:
+    raise newException(IOError, "Failed to extract dataset: " & name)
 
-proc loadCorpus(): seq[tuple[id, text: string]] =
+proc loadCorpus(dataDir: string): seq[tuple[id, text: string]] =
   let f = open(dataDir / "corpus.jsonl")
   defer: f.close()
   for line in f.lines:
@@ -29,14 +41,14 @@ proc loadCorpus(): seq[tuple[id, text: string]] =
     let fullText = (if title.len > 0: title & " " & text else: text)
     result.add((id, fullText))
 
-proc loadQueries(): seq[tuple[id, text: string]] =
+proc loadQueries(dataDir: string): seq[tuple[id, text: string]] =
   let f = open(dataDir / "queries.jsonl")
   defer: f.close()
   for line in f.lines:
     let j = parseJson(line)
     result.add((j["_id"].getStr(), j["text"].getStr()))
 
-proc loadQrels(): Table[string, HashSet[string]] =
+proc loadQrels(dataDir: string): Table[string, HashSet[string]] =
   result = initTable[string, HashSet[string]]()
   let f = open(dataDir / "qrels" / "test.tsv")
   defer: f.close()
@@ -137,19 +149,20 @@ proc computePrecision(results: Table[string, seq[string]], qrels: Table[string, 
     scores.add(float(found) / float(topK.len))
   return mean(scores)
 
-proc main() =
-  ensureDataset()
-  let corpus = loadCorpus()
-  let queries = loadQueries()
-  let qrels = loadQrels()
+proc runBenchmark*(datasetName: string) =
+  ensureDataset(datasetName)
+  let dataDir = datasetDir(datasetName)
+  let corpus = loadCorpus(dataDir)
+  let queries = loadQueries(dataDir)
+  let qrels = loadQrels(dataDir)
 
-  echo "Dataset loaded:"
+  echo "Dataset: ", datasetName
   echo "  Corpus:   ", corpus.len
   echo "  Queries:  ", queries.len
   echo "  Qrels:    ", qrels.len
 
   let cfg = defaultEngineConfig()
-  let benchDir = getCurrentDir() / "benchmarks" / "data"
+  let benchDir = getCurrentDir() / "benchmarks" / "data" / datasetName
   removeDir(benchDir)
   var service = initMemoryService(benchDir, cfg)
 
@@ -183,7 +196,7 @@ proc main() =
   sort(insertTimes)
   sort(queryTimes)
 
-  echo "\n=== Benchmark Results ==="
+  echo "\n=== Benchmark Results: ", datasetName, " ==="
   echo "\nFull Insert (storage + SDR + LSH + HNSW + Lexical):"
   echo "  Total:     ", formatFloat(totalInsert, ffDecimal, 4), " s"
   echo "  Throughput:", formatFloat(float(corpus.len) / totalInsert, ffDecimal, 2), " docs/s"
@@ -210,6 +223,32 @@ proc main() =
   echo "  MRR:       ", formatFloat(computeMrr(allResults, qrels), ffDecimal, 4)
   echo "  MAP:       ", formatFloat(computeMap(allResults, qrels), ffDecimal, 4)
   echo "  nDCG@10:   ", formatFloat(computeNdcg(allResults, qrels, 10), ffDecimal, 4)
+
+proc printUsage() =
+  echo """
+Adaline BEIR Benchmark
+
+Usage:
+  benchmark_beir <dataset>
+
+Supported datasets:
+  scifact   - Scientific fact verification (default, ~5K docs)
+  nfcorpus  - NFCorpus medical literature (~3.6K docs)
+
+Examples:
+  benchmark_beir scifact
+  benchmark_beir nfcorpus
+"""
+
+proc main() =
+  let args = commandLineParams()
+  let datasetName = if args.len > 0: args[0] else: DefaultDataset
+
+  if datasetName in ["help", "--help", "-h"]:
+    printUsage()
+    return
+
+  runBenchmark(datasetName)
 
 when isMainModule:
   main()
