@@ -79,7 +79,7 @@ proc cmdSearch(args: seq[string]) =
     quit(1)
 
   var k = 10
-  var queryWords: seq[string]
+  var queryTokens: seq[string]
 
   # Parse: last arg might be a number (topK)
   for i in 0 ..< args.len:
@@ -91,9 +91,9 @@ proc cmdSearch(args: seq[string]) =
         continue
       except ValueError:
         discard
-    queryWords.add(args[i])
+    queryTokens.add(args[i])
 
-  let query = queryWords.join(" ")
+  let query = queryTokens.join(" ")
   let output = searchMemories(service, SearchMemoriesInput(query: query, topK: k))
 
   echo "Query: \"", query, "\""
@@ -116,7 +116,7 @@ proc cmdStats() =
   echo "=== Adaline Index Stats ==="
   echo "Data directory: ", dataDir
   echo "Memories:       ", service.textCache.len
-  echo "Corpus docs:    ", service.corpus.numDocs
+  echo "Corpus memories:", service.corpus.numMemories
   echo "HNSW layers:    ", service.maxHnswLayer + 1
   echo "HNSW entry:     ", service.hnswEntryPoint
   echo "Fingerprint:    ", cfg.fingerprintBits, " bits (", cfg.fingerprintBytes, " bytes)"

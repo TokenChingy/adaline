@@ -48,9 +48,9 @@ proc loadQrels(): Table[string, HashSet[string]] =
 
 proc tokenize(text: string): seq[string] =
   let normalised = text.toLowerAscii()
-  for word in normalised.split(AllChars - Letters - Digits):
-    if word.len > 0:
-      result.add(word)
+  for token in normalised.split(AllChars - Letters - Digits):
+    if token.len > 0:
+      result.add(token)
 
 proc computeRecall(results: Table[string, seq[string]], qrels: Table[string, HashSet[string]], k: int): float =
   var scores: seq[float]
@@ -128,7 +128,7 @@ proc phraseMatchScore(query, doc: string): float =
   let d = doc.toLowerAscii()
   if q in d:
     return 1.0
-  # Check for partial phrase matches (at least half the query words in order)
+  # Check for partial phrase matches (at least half the query tokens in order)
   let qTokens = tokenize(query)
   if qTokens.len >= 3:
     for i in 0 ..< qTokens.len - 1:

@@ -32,7 +32,7 @@ suite "SDR encoder":
     let sim2 = weightedJaccard(addr fox, addr lazyDog, cfg)
     check sim1 > sim2
 
-  test "XOR-bound context distinguishes word sense":
+  test "XOR-bound context distinguishes token sense":
     let a = encodeSdr("fox quick", cfg)
     let b = encodeSdr("fox lazy", cfg)
     let c = encodeSdr("fox quick", cfg)

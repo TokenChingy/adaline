@@ -30,12 +30,8 @@ build/
 Thumbs.db
 
 # Benchmark data
-benchmarks/data*
-benchmarks/scifact/
 benchmarks/scifact.zip
-benchmarks/nfcorpus/
 benchmarks/nfcorpus.zip
-benchmarks/*.bin
 
 # Runtime files
 *.bin

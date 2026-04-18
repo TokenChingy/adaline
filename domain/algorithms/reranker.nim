@@ -4,9 +4,9 @@ import std/[tables, sets, strutils, algorithm]
 
 proc tokenize*(text: string): seq[string] =
   let normalised = text.toLowerAscii()
-  for word in normalised.split(AllChars - Letters - Digits):
-    if word.len > 0:
-      result.add(word)
+  for token in normalised.split(AllChars - Letters - Digits):
+    if token.len > 0:
+      result.add(token)
 
 proc coverageBoost*(query, doc: string): float =
   let qTokens = tokenize(query)

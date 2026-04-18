@@ -2,36 +2,36 @@ import std/[tables, sets, strutils, math]
 
 type
   CorpusIndex* = object
-    docFreqs*: Table[string, int]
+    memFreqs*: Table[string, int]
     idf*: Table[string, float]
     maxIdf*: float
-    numDocs*: int
+    numMemories*: int
 
 proc tokenize*(text: string): seq[string] =
   let normalised = text.toLowerAscii()
-  for word in normalised.split(AllChars - Letters - Digits):
-    if word.len > 0:
-      result.add(word)
+  for token in normalised.split(AllChars - Letters - Digits):
+    if token.len > 0:
+      result.add(token)
 
-proc addDocument*(index: var CorpusIndex; text: string) =
-  inc index.numDocs
+proc addMemory*(index: var CorpusIndex; text: string) =
+  inc index.numMemories
   var seen = initHashSet[string]()
   let tokens = tokenize(text)
   for token in tokens:
     seen.incl(token)
   for token in seen:
-    index.docFreqs.mgetOrPut(token, 0).inc
+    index.memFreqs.mgetOrPut(token, 0).inc
 
   # Update IDF for seen terms
   for token in seen:
-    let df = index.docFreqs[token]
-    let val = ln(float(index.numDocs) / float(df))
+    let df = index.memFreqs[token]
+    let val = ln(float(index.numMemories) / float(df))
     index.idf[token] = val
     if val > index.maxIdf:
       index.maxIdf = val
 
 proc scaledProbes*(index: CorpusIndex; feature: string; baseProbes: int): int =
-  if index.numDocs == 0 or index.maxIdf <= 0.0:
+  if index.numMemories == 0 or index.maxIdf <= 0.0:
     return baseProbes
   let idfVal = index.idf.getOrDefault(feature, 0.0)
   let ratio = idfVal / index.maxIdf

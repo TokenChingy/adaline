@@ -3,20 +3,20 @@ import std/[tables, strutils, math, algorithm]
 type
   LexicalIndex* = object
     postings*: Table[string, seq[tuple[memoryId: uint64, freq: uint32]]]
-    docLengths*: Table[uint64, uint32]
+    memLengths*: Table[uint64, uint32]
     corpusTermFreqs*: Table[string, uint64]
     totalCorpusTokens*: uint64
     mu*: float
 
 proc tokenize*(text: string): seq[string] =
   let normalised = text.toLowerAscii()
-  for word in normalised.split(AllChars - Letters - Digits):
-    if word.len > 0:
-      result.add(word)
+  for token in normalised.split(AllChars - Letters - Digits):
+    if token.len > 0:
+      result.add(token)
 
-proc addDocument*(index: var LexicalIndex; memoryId: uint64; text: string) =
+proc addMemory*(index: var LexicalIndex; memoryId: uint64; text: string) =
   let tokens = tokenize(text)
-  index.docLengths[memoryId] = uint32(tokens.len)
+  index.memLengths[memoryId] = uint32(tokens.len)
   index.totalCorpusTokens += uint64(tokens.len)
 
   var termFreqs = initCountTable[string]()
@@ -27,9 +27,9 @@ proc addDocument*(index: var LexicalIndex; memoryId: uint64; text: string) =
     index.postings.mgetOrPut(term, @[]).add((memoryId, uint32(freq)))
     index.corpusTermFreqs.mgetOrPut(term, 0'u64) += uint64(freq)
 
-proc scoreDocument*(index: LexicalIndex; query: string; memoryId: uint64): float =
+proc scoreMemory*(index: LexicalIndex; query: string; memoryId: uint64): float =
   let qTokens = tokenize(query)
-  let docLen = float(index.docLengths.getOrDefault(memoryId, 0))
+  let memLen = float(index.memLengths.getOrDefault(memoryId, 0))
   let mu = index.mu
 
   result = 0.0
@@ -48,13 +48,13 @@ proc scoreDocument*(index: LexicalIndex; query: string; memoryId: uint64): float
 
     result += ln(1.0 + float(tf) / (mu * pqc))
 
-  result += float(qTokens.len) * ln(mu / (docLen + mu))
+  result += float(qTokens.len) * ln(mu / (memLen + mu))
 
 proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memoryId: uint64, score: float]] =
   let qTokens = tokenize(query)
   var docScores = initTable[uint64, float]()
 
-  # Accumulate per-document term contributions by iterating postings directly
+  # Accumulate per-memory term contributions by iterating postings directly
   for token in qTokens:
     let corpusFreq = index.corpusTermFreqs.getOrDefault(token, 0'u64)
     if corpusFreq == 0 or index.totalCorpusTokens == 0:
@@ -70,8 +70,8 @@ proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memor
   var scored = newSeq[tuple[score: float, memoryId: uint64]]()
   let queryLen = float(qTokens.len)
   for mid, termScore in docScores:
-    let docLen = float(index.docLengths.getOrDefault(mid, 0))
-    let finalScore = termScore + queryLen * ln(index.mu / (docLen + index.mu))
+    let memLen = float(index.memLengths.getOrDefault(mid, 0))
+    let finalScore = termScore + queryLen * ln(index.mu / (memLen + index.mu))
     scored.add((finalScore, mid))
 
   scored.sort(proc(a, b: auto): int =

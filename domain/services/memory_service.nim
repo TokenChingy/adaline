@@ -41,12 +41,12 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
     if memoryId >= result.memoryIdCounter:
       result.memoryIdCounter = memoryId + uint64(cfg.fingerprintBytes)
     result.textCache[memoryId] = text
-    result.corpus.addDocument(text)
+    result.corpus.addMemory(text)
 
     let fpPtr = result.storage.getFingerprintPtr(memoryId)
     let sig = computeSignature(fpPtr, cfg)
     insertLsh(result.lsh, sig, memoryId)
-    addDocument(result.lexical, memoryId, text)
+    addMemory(result.lexical, memoryId, text)
 
     let node = result.storage.getHnswNodePtr(memoryId)
     if node.layerCount > 0:
@@ -64,7 +64,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
   service.textCache[memoryId] = content
 
   # 2. Update corpus index
-  service.corpus.addDocument(content)
+  service.corpus.addMemory(content)
 
   # 3. Fingerprint (with IDF scaling)
   var fp = encodeSdr(content, service.cfg, service.corpus)
@@ -75,7 +75,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
   insertLsh(service.lsh, sig, memoryId)
 
   # 5. Lexical
-  addDocument(service.lexical, memoryId, content)
+  addMemory(service.lexical, memoryId, content)
 
   # 6. HNSW
   service.storage.ensureGraphCapacity(memoryId)

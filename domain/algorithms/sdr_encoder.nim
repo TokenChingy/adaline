@@ -38,9 +38,9 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
 
   # --- Block A: Tokens ---
   var tokens: seq[string] = @[]
-  for word in normalised.split(AllChars - Letters - Digits):
-    if word.len > 0:
-      tokens.add(word)
+  for token in normalised.split(AllChars - Letters - Digits):
+    if token.len > 0:
+      tokens.add(token)
 
   for token in tokens:
     let n = scaledProbes(index, token, cfg.tokenProbes)
