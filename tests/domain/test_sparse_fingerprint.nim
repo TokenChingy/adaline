@@ -12,7 +12,7 @@ suite "SDR encoder":
     let a = encodeSdr("hello world", cfg)
     let b = encodeSdr("hello world", cfg)
     var diff = 0
-    for i in 0 ..< FingerprintWords:
+    for i in 0 ..< FingerprintSegments:
       diff += popcount(a.bits[i] xor b.bits[i])
     check diff == 0
 
@@ -20,7 +20,7 @@ suite "SDR encoder":
     let a = encodeSdr("nim programming language", cfg)
     let b = encodeSdr("python programming language", cfg)
     var diff = 0
-    for i in 0 ..< FingerprintWords:
+    for i in 0 ..< FingerprintSegments:
       diff += popcount(a.bits[i] xor b.bits[i])
     check diff > 0
 

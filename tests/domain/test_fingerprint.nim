@@ -7,7 +7,7 @@ suite "Fingerprint entity":
     for w in fp.bits:
       check w == 0'u64
 
-  test "setBit sets correct word and bit":
+  test "setBit sets correct segment and bit":
     var fp = initFingerprint()
     setBit(fp, 0)
     check fp.bits[0] == 1'u64
@@ -23,7 +23,7 @@ suite "Fingerprint entity":
     setBit(a, 1)
     setBit(b, 1)
     setBit(b, 2)
-    let inter = popcountRegionAnd(addr a, addr b, TokenWordStart, TokenWordCount)
-    let unionPop = popcountRegionOr(addr a, addr b, TokenWordStart, TokenWordCount)
+    let inter = popcountRegionAnd(addr a, addr b, TokenSegmentStart, TokenSegmentCount)
+    let unionPop = popcountRegionOr(addr a, addr b, TokenSegmentStart, TokenSegmentCount)
     check inter == 1
     check unionPop == 3

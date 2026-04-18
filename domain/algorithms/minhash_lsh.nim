@@ -19,13 +19,13 @@ proc computeSignature*(fp: ptr Fingerprint; cfg: EngineConfig): array[MaxHashFun
   for i in 0 ..< cfg.minHashFunctions:
     result[i] = high(uint64)
 
-  for wordIdx in 0 ..< FingerprintWords:
-    let word = fp.bits[wordIdx]
-    if word == 0:
+  for segmentIdx in 0 ..< FingerprintSegments:
+    let segment = fp.bits[segmentIdx]
+    if segment == 0:
       continue
     for bitOffset in 0 ..< 64:
-      if (word and (1'u64 shl bitOffset)) != 0:
-        let pos = wordIdx * 64 + bitOffset
+      if (segment and (1'u64 shl bitOffset)) != 0:
+        let pos = segmentIdx * 64 + bitOffset
         for h in 0 ..< cfg.minHashFunctions:
           let hv = minHashValue(h, pos)
           if hv < result[h]:
