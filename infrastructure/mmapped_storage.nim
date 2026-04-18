@@ -89,8 +89,9 @@ proc initStorage*(dataDir: string): MmappedStorage =
 
 proc appendWal*(storage: MmappedStorage; memoryId: uint64; text: string): uint64 =
   result = storage.walSize
-  storage.walFile.write(memoryId)
-  storage.walFile.write(uint32(text.len))
+  var textLen = uint32(text.len)
+  discard storage.walFile.writeBuffer(unsafeAddr memoryId, sizeof(uint64))
+  discard storage.walFile.writeBuffer(unsafeAddr textLen, sizeof(uint32))
   storage.walFile.write(text)
   storage.walFile.flushFile()
   storage.walSize += uint64(sizeof(uint64) + sizeof(uint32) + text.len)

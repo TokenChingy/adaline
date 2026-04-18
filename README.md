@@ -9,7 +9,7 @@ A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped fl
 │  Insert Flow                                                                │
 │                                                                             │
 │  Input Text ──► SDR Encoder ──► Fingerprint Store (mmap)                    │
-│       │              │                                                       │
+│       │              │                                                      │
 │       │              └──► MinHash LSH Index (in-memory)                     │
 │       │              └──► HNSW Graph (mmap)                                 │
 │       │              └──► Lexical Index (in-memory)                         │
@@ -21,14 +21,14 @@ A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped fl
 │  Search Flow                                                                │
 │                                                                             │
 │  Query ──► SDR Encoder ──► MinHash LSH ──► Candidate Seeds                  │
-│       │                         │                                          │
+│       │                         │                                           │
 │       │                         └──► HNSW Graph Search (layer-0 descent)    │
-│       │                                         │                          │
+│       │                                         │                           │
 │       │                                         └──► Top-K Semantic         │
-│       │                                                                    │
-│       └──► Lexical Index (QLM + Dirichlet) ──► Top-K Lexical              │
+│       │                                                                     │
+│       └──► Lexical Index (QLM + Dirichlet) ──► Top-K Lexical                │
 │                                                                             │
-│                          RRF Merge ──► Term-Coverage Rerank ──► Final     │
+│                          RRF Merge ──► Term-Coverage Rerank ──► Final       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
