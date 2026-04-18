@@ -28,7 +28,7 @@ A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped fl
 │       │                                                                    │
 │       └──► Lexical Index (QLM + Dirichlet) ──► Top-K Lexical              │
 │                                                                             │
-│                          RRF Merge ──► Final Ranked Results                │
+│                          RRF Merge ──► Term-Coverage Rerank ──► Final     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,10 +79,11 @@ A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped fl
    - Any bucket that shares a band hash with the query returns its MemoryIDs.
    - Results are deduplicated.
 
-3. **Semantic Search (Adaptive)**
-   - **Small datasets (< 100 docs):** Brute-force weighted Jaccard against all documents.
-   - **Medium datasets (< 10K docs):** Brute-force weighted Jaccard against LSH seeds only.
-   - **Large datasets:** Standard HNSW descent from the global entry point through upper layers, then `efSearch=64` beam search at layer 0. LSH seeds are also scored directly and merged.
+3. **LSH Wormhole (Semantic Search)**
+   - Hash the query through MinHash LSH to retrieve seed MemoryIDs.
+   - Drop those seeds into the HNSW graph's lower layers.
+   - Execute greedy search outward (`efSearch=64`) to find local optimums.
+   - LSH seeds are scored directly and merged with HNSW results.
    - Distance metric: `1.0 - weightedJaccard`.
 
 4. **Lexical Search**
@@ -98,7 +99,11 @@ A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped fl
      ```
      RRF = 1/(60 + rank_semantic) + 1/(60 + rank_lexical)
      ```
-   - Final results are sorted by RRF score descending.
+
+6. **Term-Coverage Rerank**
+   - Each candidate document is tokenized and checked for exact query term coverage.
+   - A coverage boost (`coverageRatio * 0.5`) is added to the RRF score.
+   - Results are re-sorted by the boosted score descending.
 
 ## Storage Layout
 
