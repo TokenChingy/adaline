@@ -1,0 +1,36 @@
+# Ignore all files without extension (compiled Unix binaries)
+*
+!*.*
+!*/
+
+# Keep important project files
+!.gitignore
+!.gitmodules
+!LICENSE*
+!README*
+!Makefile
+
+# Nim cache and build artifacts
+nimcache/
+nimblecache/
+testresults/
+htmldocs/
+build/
+
+# IDE and editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Benchmark data
+benchmarks/data*
+benchmarks/scifact/
+benchmarks/scifact.zip
+benchmarks/*.bin
