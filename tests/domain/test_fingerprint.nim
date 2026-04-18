@@ -1,6 +1,5 @@
 import unittest
 import ../../domain/entities/fingerprint
-import ../../domain/entities/config
 
 suite "Fingerprint entity":
   test "initFingerprint creates zeroed bitmap":
