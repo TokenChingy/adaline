@@ -2,6 +2,8 @@
 
 Benchmarks are run against BEIR datasets using the unified LSH Wormhole search path (LSH seeds → HNSW layer-0 descent) with term-coverage reranking.
 
+**Important:** All quality metrics below are averaged over the **full query set** (every query in `queries.jsonl`), including queries with no qrels. Queries without relevance judgments contribute a score of 0. This produces conservative numbers compared to averaging only over judged queries.
+
 ## Hardware
 
 - CPU: x86_64 (likely 4-8 cores, exact model depends on host)
@@ -37,51 +39,50 @@ Datasets are auto-downloaded on first run and cached in `benchmarks/<name>/`.
 | Metric | Value |
 |--------|-------|
 | Corpus | 5,183 documents |
-| Queries | 1,109 |
-| Qrels | 300 |
+| Queries (total) | 1,109 |
+| Queries (with qrels) | 300 |
 
 ### Indexing Speed
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 5.80 s |
-| Throughput | 894 docs/s |
-| P50 latency | 0.96 ms |
-| P95 latency | 2.17 ms |
-| P99 latency | 3.65 ms |
+| Total time | 6.17 s |
+| Throughput | 840 docs/s |
+| P50 latency | 1.06 ms |
+| P95 latency | 2.02 ms |
+| P99 latency | 3.51 ms |
 
 ### Query Speed (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 5.48 s |
-| Throughput | 202 queries/s |
-| P50 latency | 4.82 ms |
-| P95 latency | 6.36 ms |
-| P99 latency | 7.82 ms |
+| Total time | 5.97 s |
+| Throughput | 186 queries/s |
+| P50 latency | 5.26 ms |
+| P95 latency | 6.92 ms |
+| P99 latency | 8.41 ms |
 
-### Retrieval Quality
+### Retrieval Quality (all 1,109 queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 41.58% |
-| Recall@5 | 60.81% |
-| Recall@10 | 67.17% |
-| Recall@100 | 87.37% |
-| Precision@1 | 43.00% |
-| Precision@5 | 13.00% |
-| Precision@10 | 7.40% |
-| Precision@100 | 0.98% |
-| MRR | 0.5234 |
-| MAP | 0.5121 |
-| nDCG@10 | 0.5475 |
+| Recall@1 | 11.23% |
+| Recall@5 | 16.63% |
+| Recall@10 | 18.17% |
+| Recall@100 | 23.62% |
+| Precision@1 | 11.54% |
+| Precision@5 | 3.55% |
+| Precision@10 | 2.00% |
+| Precision@100 | 0.27% |
+| MRR | 0.1415 |
+| MAP | 0.1387 |
+| nDCG@10 | 0.1482 |
 
 ### Observations
 
 - **Query latency is excellent** for a pure-Nim, memory-mapped engine. P50 ~5ms for top-100 semantic+lexical fusion on a 5K corpus is competitive with much heavier systems.
-- **Recall@1 of 41.6%** on SciFact means the system finds the top relevant document in the first position ~42% of the time. This is solid for a sparse fingerprint approach without neural re-ranking.
-- **nDCG@10 of 0.55** shows good ranking quality in the top 10. The term-coverage reranker contributes significantly here — without it, nDCG@10 was ~0.36 in earlier experiments.
-- **The bottleneck is not search** — 202 q/s means a single core can handle production query loads for small-to-medium corpora.
+- **Metrics are conservative** because they average over all 1,109 queries. Only 300 have qrels; the other 809 contribute 0. If averaged over judged queries only: Recall@1 ≈ 41.6%, nDCG@10 ≈ 0.55.
+- **The bottleneck is not search** — 186 q/s means a single core can handle production query loads for small-to-medium corpora.
 - **Memory footprint is tiny**: ~6.5 MB for fingerprints (5K × 1280 bytes) plus a few MB for in-memory indexes.
 
 ---
@@ -91,52 +92,52 @@ Datasets are auto-downloaded on first run and cached in `benchmarks/<name>/`.
 | Metric | Value |
 |--------|-------|
 | Corpus | 3,633 documents |
-| Queries | 3,237 |
-| Qrels | 323 |
+| Queries (total) | 3,237 |
+| Queries (with qrels) | 323 |
 
 ### Indexing Speed
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 4.50 s |
-| Throughput | 807 docs/s |
-| P50 latency | 1.03 ms |
-| P95 latency | 2.61 ms |
-| P99 latency | 4.39 ms |
+| Total time | 4.69 s |
+| Throughput | 775 docs/s |
+| P50 latency | 1.13 ms |
+| P95 latency | 2.34 ms |
+| P99 latency | 3.96 ms |
 
 ### Query Speed (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 9.89 s |
-| Throughput | 327 queries/s |
-| P50 latency | 3.65 ms |
-| P95 latency | 5.23 ms |
-| P99 latency | 6.47 ms |
+| Total time | 9.84 s |
+| Throughput | 329 queries/s |
+| P50 latency | 3.56 ms |
+| P95 latency | 5.33 ms |
+| P99 latency | 7.27 ms |
 
-### Retrieval Quality
+### Retrieval Quality (all 3,237 queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 5.03% |
-| Recall@5 | 10.53% |
-| Recall@10 | 13.03% |
-| Recall@100 | 22.24% |
-| Precision@1 | 39.32% |
-| Precision@5 | 26.67% |
-| Precision@10 | 22.49% |
-| Precision@100 | 13.77% |
-| MRR | 0.4672 |
-| MAP | 0.1206 |
-| nDCG@10 | 0.2693 |
+| Recall@1 | 0.49% |
+| Recall@5 | 1.08% |
+| Recall@10 | 1.29% |
+| Recall@100 | 2.21% |
+| Precision@1 | 3.71% |
+| Precision@5 | 2.64% |
+| Precision@10 | 2.24% |
+| Precision@100 | 1.36% |
+| MRR | 0.0457 |
+| MAP | 0.0122 |
+| nDCG@10 | 0.0268 |
 
 ### Observations
 
 - **NFCorpus is a much harder dataset** than SciFact. Medical literature has sparse relevance judgments (only 323 qrels across 3,237 queries) and documents are longer and more lexically diverse.
-- **Recall is low** (5% @ 1, 22% @ 100) because the task is passage retrieval from long medical abstracts with very few labeled positives per query. The system still ranks reasonably well by MRR (0.47), meaning when it does find a relevant doc, it's often near the top.
-- **Precision is strong**: 39% at rank 1 means the top result is relevant nearly 40% of the time. This suggests the semantic+lexical fusion works well for high-confidence matches even when overall recall is limited by sparse labels.
-- **Query throughput is higher** than SciFact (327 vs 202 q/s) because NFCorpus has fewer documents. HNSW search time scales sub-linearly with corpus size.
-- **The low MAP (0.12)** reflects the difficulty of the dataset more than the engine. NFCorpus is known to be challenging for sparse retrieval methods.
+- **Recall is very low** when averaged over all queries because 2,914 queries have no judgments and contribute 0. Over judged queries only: Recall@1 ≈ 5.0%, nDCG@10 ≈ 0.27.
+- **Precision@1 of 3.7%** means the top result is relevant ~4% of the time across all queries. Over judged queries only, this rises to ~39%.
+- **Query throughput is higher** than SciFact (329 vs 186 q/s) because NFCorpus has fewer documents. HNSW search time scales sub-linearly with corpus size.
+- **The low MAP (0.012)** reflects the difficulty of the dataset and the large number of unjudged queries more than the engine itself. NFCorpus is known to be challenging for sparse retrieval methods.
 
 ---
 
@@ -171,4 +172,4 @@ To run:
 - **Lexical scoring**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
 - **Fusion**: Reciprocal Rank Fusion (k=60).
 - **Reranking**: Term-coverage boost (weight=0.5) applied to top-K merged results.
-- **Metrics**: Computed against BEIR qrels (binary relevance). nDCG uses standard `1/log2(rank+1)` gain.
+- **Metrics**: Computed against BEIR qrels (binary relevance). Averaged over **all queries** in `queries.jsonl`, with unjudged queries scoring 0. nDCG uses standard `1/log2(rank+1)` gain.

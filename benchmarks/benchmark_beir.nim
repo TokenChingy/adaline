@@ -78,75 +78,92 @@ proc mean(values: seq[float]): float =
 
 proc computeRecall(results: Table[string, seq[string]], qrels: Table[string, HashSet[string]], k: int): float =
   var scores: seq[float]
-  for qid, relevant in qrels.pairs:
-    if not results.hasKey(qid): continue
-    let topK = results[qid][0 ..< min(k, results[qid].len)]
-    var found = 0
-    for cid in topK:
-      if relevant.contains(cid): inc found
-    if relevant.len > 0:
-      scores.add(float(found) / float(relevant.len))
+  for qid, _ in results.pairs:
+    if qrels.hasKey(qid):
+      let relevant = qrels[qid]
+      let topK = results[qid][0 ..< min(k, results[qid].len)]
+      var found = 0
+      for cid in topK:
+        if relevant.contains(cid): inc found
+      if relevant.len > 0:
+        scores.add(float(found) / float(relevant.len))
+      else:
+        scores.add(0.0)
+    else:
+      scores.add(0.0)
   return mean(scores)
 
 proc computeMrr(results: Table[string, seq[string]], qrels: Table[string, HashSet[string]]): float =
   var scores: seq[float]
-  for qid, relevant in qrels.pairs:
-    if not results.hasKey(qid): continue
-    var rank = 0
-    for i, cid in results[qid]:
-      if relevant.contains(cid):
-        rank = i + 1
-        break
-    if rank > 0:
-      scores.add(1.0 / float(rank))
+  for qid, _ in results.pairs:
+    if qrels.hasKey(qid):
+      let relevant = qrels[qid]
+      var rank = 0
+      for i, cid in results[qid]:
+        if relevant.contains(cid):
+          rank = i + 1
+          break
+      if rank > 0:
+        scores.add(1.0 / float(rank))
+      else:
+        scores.add(0.0)
     else:
       scores.add(0.0)
   return mean(scores)
 
 proc computeMap(results: Table[string, seq[string]], qrels: Table[string, HashSet[string]]): float =
   var scores: seq[float]
-  for qid, relevant in qrels.pairs:
-    if not results.hasKey(qid): continue
-    var found = 0
-    var precSum = 0.0
-    for i, cid in results[qid]:
-      if relevant.contains(cid):
-        inc found
-        precSum += float(found) / float(i + 1)
-    if relevant.len > 0:
-      scores.add(precSum / float(relevant.len))
+  for qid, _ in results.pairs:
+    if qrels.hasKey(qid):
+      let relevant = qrels[qid]
+      var found = 0
+      var precSum = 0.0
+      for i, cid in results[qid]:
+        if relevant.contains(cid):
+          inc found
+          precSum += float(found) / float(i + 1)
+      if relevant.len > 0:
+        scores.add(precSum / float(relevant.len))
+      else:
+        scores.add(0.0)
     else:
       scores.add(0.0)
   return mean(scores)
 
 proc computeNdcg(results: Table[string, seq[string]], qrels: Table[string, HashSet[string]], k: int): float =
   var scores: seq[float]
-  for qid, relevant in qrels.pairs:
-    if not results.hasKey(qid): continue
-    let topK = results[qid][0 ..< min(k, results[qid].len)]
-    var dcg = 0.0
-    for i, cid in topK:
-      if relevant.contains(cid):
-        dcg += 1.0 / log2(float(i + 2))
-    var idcg = 0.0
-    let relCount = min(relevant.len, k)
-    for i in 0 ..< relCount:
-      idcg += 1.0 / log2(float(i + 2))
-    if idcg > 0:
-      scores.add(dcg / idcg)
+  for qid, _ in results.pairs:
+    if qrels.hasKey(qid):
+      let relevant = qrels[qid]
+      let topK = results[qid][0 ..< min(k, results[qid].len)]
+      var dcg = 0.0
+      for i, cid in topK:
+        if relevant.contains(cid):
+          dcg += 1.0 / log2(float(i + 2))
+      var idcg = 0.0
+      let relCount = min(relevant.len, k)
+      for i in 0 ..< relCount:
+        idcg += 1.0 / log2(float(i + 2))
+      if idcg > 0:
+        scores.add(dcg / idcg)
+      else:
+        scores.add(0.0)
     else:
       scores.add(0.0)
   return mean(scores)
 
 proc computePrecision(results: Table[string, seq[string]], qrels: Table[string, HashSet[string]], k: int): float =
   var scores: seq[float]
-  for qid, relevant in qrels.pairs:
-    if not results.hasKey(qid): continue
-    let topK = results[qid][0 ..< min(k, results[qid].len)]
-    var found = 0
-    for cid in topK:
-      if relevant.contains(cid): inc found
-    scores.add(float(found) / float(topK.len))
+  for qid, _ in results.pairs:
+    if qrels.hasKey(qid):
+      let relevant = qrels[qid]
+      let topK = results[qid][0 ..< min(k, results[qid].len)]
+      var found = 0
+      for cid in topK:
+        if relevant.contains(cid): inc found
+      scores.add(float(found) / float(topK.len))
+    else:
+      scores.add(0.0)
   return mean(scores)
 
 proc runBenchmark*(datasetName: string) =
