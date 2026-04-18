@@ -3,14 +3,13 @@ import ../entities/config
 import ../entities/hnsw_node
 import ../algorithms/sdr_encoder
 import ../algorithms/corpus_index
-import ../algorithms/weighted_jaccard
 import ../algorithms/minhash_lsh
 import ../algorithms/hnsw_graph
 import ../algorithms/lexical_index
 import ../algorithms/rrf_merger
 import ../algorithms/reranker
 import ../../infrastructure/mmapped_storage
-import std/[tables, random, algorithm]
+import std/[tables, random]
 
 type
   MemoryService* = object
@@ -89,38 +88,12 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   let qfp = encodeSdr(query, service.cfg, service.corpus)
   let qsig = computeSignature(addr qfp, service.cfg)
 
-  # Semantic lane: LSH candidates -> brute-force scoring (fast for small datasets)
+  # LSH Wormhole: hash the query through MinHash LSH to retrieve seed MemoryIDs,
+  # then drop those seeds into the HNSW graph's lower layers and greedily
+  # search outward to find the true local optimums.
   let lshSeeds = queryLsh(service.lsh, qsig)
   var semanticResults = newSeq[tuple[memoryId: uint64, score: float]]()
-
-  # For small datasets, brute-force score all documents or LSH seeds
-  if service.textCache.len < 100:
-    var scored = newSeq[tuple[score: float, mid: uint64]]()
-    for mid, _ in service.textCache:
-      let sptr = service.storage.getFingerprintPtr(mid)
-      let score = weightedJaccard(addr qfp, sptr, service.cfg)
-      scored.add((score, mid))
-    scored.sort(proc(a, b: auto): int =
-      if a.score > b.score: return -1
-      if a.score < b.score: return 1
-      return 0
-    )
-    for i in 0 ..< min(k, scored.len):
-      semanticResults.add((scored[i].mid, scored[i].score))
-  elif lshSeeds.len > 0 and service.textCache.len < 10000:
-    var scored = newSeq[tuple[score: float, mid: uint64]]()
-    for seed in lshSeeds:
-      let sptr = service.storage.getFingerprintPtr(seed)
-      let score = weightedJaccard(addr qfp, sptr, service.cfg)
-      scored.add((score, seed))
-    scored.sort(proc(a, b: auto): int =
-      if a.score > b.score: return -1
-      if a.score < b.score: return 1
-      return 0
-    )
-    for i in 0 ..< min(k, scored.len):
-      semanticResults.add((scored[i].mid, scored[i].score))
-  elif service.hnswEntryPoint != 0:
+  if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
     semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
                                  lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
 
