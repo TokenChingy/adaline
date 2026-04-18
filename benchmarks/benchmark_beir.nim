@@ -234,10 +234,12 @@ Usage:
 Supported datasets:
   scifact   - Scientific fact verification (default, ~5K docs)
   nfcorpus  - NFCorpus medical literature (~3.6K docs)
+  msmarco   - MS MARCO passage retrieval (~8.8M docs, 1GB+ download)
 
 Examples:
   benchmark_beir scifact
   benchmark_beir nfcorpus
+  benchmark_beir msmarco
 """
 
 proc main() =
