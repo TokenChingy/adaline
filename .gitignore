@@ -35,4 +35,7 @@ benchmarks/scifact.zip
 benchmarks/nfcorpus.zip
 
 # Runtime files
-*.binbenchmarks/data/longmemeval_s_cleaned.json
+*.bin
+
+# Benchmark data downloads
+benchmarks/data/longmemeval_s_cleaned.json
