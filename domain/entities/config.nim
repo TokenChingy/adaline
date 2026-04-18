@@ -37,6 +37,9 @@ type
     # RRF constant
     rrfK*: int
 
+    # Reranker
+    rerankCoverageWeight*: float
+
 proc defaultEngineConfig*(): EngineConfig =
   result = EngineConfig(
     fingerprintBytes: 1280,
@@ -59,5 +62,6 @@ proc defaultEngineConfig*(): EngineConfig =
     hnswEfConstruction: 200,
     hnswEfSearch: 64,
     dirichletMu: 2000.0,
-    rrfK: 60
+    rrfK: 60,
+    rerankCoverageWeight: 0.5
   )

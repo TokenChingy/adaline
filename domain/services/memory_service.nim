@@ -8,6 +8,7 @@ import ../algorithms/minhash_lsh
 import ../algorithms/hnsw_graph
 import ../algorithms/lexical_index
 import ../algorithms/rrf_merger
+import ../algorithms/reranker
 import ../../infrastructure/mmapped_storage
 import std/[tables, random, algorithm]
 
@@ -129,11 +130,15 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   # RRF merge
   let merged = mergeRrf(semanticResults, lexicalResults, k, service.cfg.rrfK)
 
-  result = newSeq[Memory](merged.len)
+  var candidates = newSeq[Memory](merged.len)
   for i in 0 ..< merged.len:
     let mid = merged[i].memoryId
-    result[i] = Memory(
+    candidates[i] = Memory(
       id: mid,
       content: service.textCache.getOrDefault(mid, ""),
       score: merged[i].score
     )
+
+  # Rerank top candidates with term-coverage boost
+  rerank(query, candidates, service.textCache, service.cfg)
+  result = candidates
