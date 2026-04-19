@@ -84,3 +84,74 @@ proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memor
   result = newSeq[tuple[memoryId: uint64, score: float]](topK)
   for i in 0 ..< topK:
     result[i] = (scored[i].memoryId, scored[i].score)
+
+# ---------------------------------------------------------------------------
+# Serialization (flat binary)
+# ---------------------------------------------------------------------------
+
+proc saveLexical*(index: LexicalIndex; path: string; walOffset: uint64 = 0) =
+  var f = open(path, fmWrite)
+  let magic = "ADLLEX01"
+  discard f.writeBuffer(unsafeAddr magic[0], 8)
+  discard f.writeBuffer(unsafeAddr walOffset, 8)
+  let numTerms = uint64(index.postings.len)
+  discard f.writeBuffer(unsafeAddr numTerms, 8)
+  for term, postings in index.postings:
+    let termLen = uint32(term.len)
+    discard f.writeBuffer(unsafeAddr termLen, 4)
+    f.write(term)
+    let corpusFreq = index.corpusTermFreqs.getOrDefault(term, 0'u64)
+    discard f.writeBuffer(unsafeAddr corpusFreq, 8)
+    let numPostings = uint32(postings.len)
+    discard f.writeBuffer(unsafeAddr numPostings, 4)
+    for (mid, freq) in postings:
+      discard f.writeBuffer(unsafeAddr mid, 8)
+      discard f.writeBuffer(unsafeAddr freq, 4)
+  let numMemLengths = uint64(index.memLengths.len)
+  discard f.writeBuffer(unsafeAddr numMemLengths, 8)
+  for mid, len in index.memLengths:
+    discard f.writeBuffer(unsafeAddr mid, 8)
+    discard f.writeBuffer(unsafeAddr len, 4)
+  discard f.writeBuffer(unsafeAddr index.totalCorpusTokens, 8)
+  discard f.writeBuffer(unsafeAddr index.mu, 8)
+  f.close()
+
+proc loadLexical*(path: string; walOffset: var uint64): LexicalIndex =
+  walOffset = 0
+  var f = open(path, fmRead)
+  var magic = newString(8)
+  if f.readBuffer(addr magic[0], 8) != 8 or magic != "ADLLEX01":
+    f.close()
+    return
+  discard f.readBuffer(addr walOffset, 8)
+  var numTerms: uint64
+  discard f.readBuffer(addr numTerms, 8)
+  for i in 0 ..< int(numTerms):
+    var termLen: uint32
+    discard f.readBuffer(addr termLen, 4)
+    var term = newString(int(termLen))
+    discard f.readBuffer(addr term[0], int(termLen))
+    var corpusFreq: uint64
+    discard f.readBuffer(addr corpusFreq, 8)
+    result.corpusTermFreqs[term] = corpusFreq
+    var numPostings: uint32
+    discard f.readBuffer(addr numPostings, 4)
+    var postings = newSeq[tuple[memoryId: uint64, freq: uint32]]()
+    for j in 0 ..< int(numPostings):
+      var mid: uint64
+      var freq: uint32
+      discard f.readBuffer(addr mid, 8)
+      discard f.readBuffer(addr freq, 4)
+      postings.add((mid, freq))
+    result.postings[term] = postings
+  var numMemLengths: uint64
+  discard f.readBuffer(addr numMemLengths, 8)
+  for i in 0 ..< int(numMemLengths):
+    var mid: uint64
+    var len: uint32
+    discard f.readBuffer(addr mid, 8)
+    discard f.readBuffer(addr len, 4)
+    result.memLengths[mid] = len
+  discard f.readBuffer(addr result.totalCorpusTokens, 8)
+  discard f.readBuffer(addr result.mu, 8)
+  f.close()

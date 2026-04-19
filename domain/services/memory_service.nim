@@ -10,7 +10,7 @@ import ../algorithms/rrf_merger
 import ../algorithms/reranker
 import ../algorithms/chunker
 import ../../infrastructure/mmapped_storage
-import std/[tables, random, times, algorithm]
+import std/[tables, random, times, algorithm, os]
 
 type
   MemoryService* = object
@@ -38,6 +38,28 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   result.timestampCache = initTable[uint64, uint64]()
   result.chunkToParent = initTable[uint64, uint64]()
 
+  # Try loading persisted indexes
+  let lshPath = dataDir / "lsh.bin"
+  let lexicalPath = dataDir / "lexical.bin"
+  let corpusPath = dataDir / "corpus.bin"
+  var lshOffset, lexicalOffset, corpusOffset: uint64
+  var haveLsh = false
+  var haveLexical = false
+  var haveCorpus = false
+  if fileExists(lshPath) and fileExists(lexicalPath) and fileExists(corpusPath):
+    result.lsh = loadLsh(cfg, lshPath, lshOffset)
+    result.lexical = loadLexical(lexicalPath, lexicalOffset)
+    result.corpus = loadCorpus(corpusPath, corpusOffset)
+    haveLsh = lshOffset > 0 or result.lsh.buckets.len > 0
+    haveLexical = lexicalOffset > 0 or result.lexical.postings.len > 0
+    haveCorpus = corpusOffset > 0 or result.corpus.memFreqs.len > 0
+
+  let persistedOffset = if haveLsh and haveLexical and haveCorpus and
+                          lshOffset == lexicalOffset and lexicalOffset == corpusOffset:
+                          lshOffset
+                        else:
+                          0'u64
+
   # Replay chunk mappings first
   let chunkEntries = replayChunks(result.storage)
   var parentToChunks = initTable[uint64, seq[uint64]]()
@@ -50,39 +72,46 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
       maxId = chunkId
     hasData = true
 
-  # Replay WAL to rebuild in-memory indexes
+  # Replay WAL: always rebuild textCache/timestampCache; only rebuild
+  # LSH/lexical/corpus for entries after persistedOffset
   let entries = replayWal(result.storage)
+  var walPos: uint64 = 0
   for (parentId, timestamp, text) in entries:
     result.textCache[parentId] = text
     result.timestampCache[parentId] = timestamp
-    result.corpus.addMemory(text)
     if parentId > maxId:
       maxId = parentId
     hasData = true
 
+    let entrySize = uint64(sizeof(uint64) + sizeof(uint64) + sizeof(uint32) + text.len)
+    let entryStart = walPos
+    walPos += entrySize
+
     # Determine chunk IDs for this parent
     let storedChunkIds = parentToChunks.getOrDefault(parentId, @[])
     let chunkTexts = splitIntoChunks(text, cfg)
-
     let effectiveChunkIds = if storedChunkIds.len > 0:
                               storedChunkIds
                             else:
-                              # Legacy unchunked memory
                               @[parentId]
-
     let numChunks = min(effectiveChunkIds.len, chunkTexts.len)
+
+    if entryStart < persistedOffset:
+      # Already in persisted indexes; just rebuild corpus (needed for IDF)
+      result.corpus.addMemory(text)
+    else:
+      # New entry since last checkpoint
+      result.corpus.addMemory(text)
+      for i in 0 ..< numChunks:
+        let chunkId = effectiveChunkIds[i]
+        let chunkText = chunkTexts[i]
+        addMemory(result.lexical, chunkId, chunkText)
+        let fpPtr = result.storage.getFingerprintPtr(chunkId)
+        insertLsh(result.lsh, fpPtr, chunkId)
+
+    # Find HNSW entry point from stored graph (always needed)
     for i in 0 ..< numChunks:
       let chunkId = effectiveChunkIds[i]
-      let chunkText = chunkTexts[i]
-
-      # Rebuild lexical index from chunk text
-      addMemory(result.lexical, chunkId, chunkText)
-
-      # Rebuild LSH from stored fingerprint
-      let fpPtr = result.storage.getFingerprintPtr(chunkId)
-      insertLsh(result.lsh, fpPtr, chunkId)
-
-      # Find HNSW entry point from stored graph
       let node = result.storage.getHnswNodePtr(chunkId)
       if node.layerCount > 0:
         let layer = int(node.entryLayer)
@@ -91,7 +120,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
           result.hnswEntryPoint = chunkId
 
   if hasData:
-    # Ensure storage header reflects the high-water mark of used slots
     result.storage.syncRecordCount(maxId + 1)
 
 proc insert*(service: var MemoryService; content: string): uint64 =
@@ -186,6 +214,16 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
 
   # Sync header to disk after delete
   service.storage.syncHeader()
+
+proc checkpoint*(service: var MemoryService) =
+  ## Persist in-memory indexes to disk so future restarts can skip WAL replay.
+  let walOffset = service.storage.walSize
+  let lshPath = service.storage.dataDir / "lsh.bin"
+  let lexicalPath = service.storage.dataDir / "lexical.bin"
+  let corpusPath = service.storage.dataDir / "corpus.bin"
+  saveLsh(service.lsh, lshPath, walOffset)
+  saveLexical(service.lexical, lexicalPath, walOffset)
+  saveCorpus(service.corpus, corpusPath, walOffset)
 
 proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   let qfp = encodeSdr(query, service.cfg, service.corpus, isQuery = true)
