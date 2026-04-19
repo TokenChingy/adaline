@@ -12,7 +12,7 @@ export types
 
 proc insert*(service: var MemoryService; content: string): uint64 =
   var storage = service.storage
-  let parentId = storage.allocSlot()
+  let parentId = storage.allocId()
   let timestamp = uint64(getTime().toUnix())
 
   # 1. WAL stores the parent memory
@@ -45,7 +45,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
   else:
     # Chunked: create multiple indexable units
     for chunkText in chunks:
-      let chunkId = storage.allocSlot()
+      let chunkId = storage.allocId()
       service.chunkToParent[chunkId] = parentId
       discard storage.appendChunkMapping(parentId, chunkId)
 

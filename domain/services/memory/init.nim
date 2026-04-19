@@ -110,10 +110,10 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
     result.storage.syncRecordCount(maxId + 1)
 
   # Rebuild reverse edge index from graph
-  let slotCount = result.storage.recordCount
-  for slot in 0'u64 ..< slotCount:
-    let node = result.storage.getHnswNodePtr(slot)
+  let idCount = result.storage.recordCount
+  for id in 0'u64 ..< idCount:
+    let node = result.storage.getHnswNodePtr(id)
     if node.layerCount > 0:
       for lc in 0 ..< int(node.layerCount):
         for nid in node.neighbors(lc):
-          result.hnswReverseIndex.mgetOrPut(nid, @[]).add(slot)
+          result.hnswReverseIndex.mgetOrPut(nid, @[]).add(id)

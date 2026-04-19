@@ -54,7 +54,7 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
     removeMemory(service.lexical, chunkId, chunkText)
 
     # Free the storage slot
-    service.storage.freeSlot(chunkId)
+    service.storage.freeId(chunkId)
 
     # Remove chunk→parent mapping
     service.chunkToParent.del(chunkId)

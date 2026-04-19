@@ -20,7 +20,7 @@ A Nim vector search engine that turns text into **10240-bit sparse fingerprints*
     └────┬────┘
          ▼
     ┌─────────────────┐
-    │ allocSlot()     │──▶ parentId
+    │ allocId()       │──▶ parentId
     │ appendWal()     │
     │ textCache[id]   │
     │ corpus.add()    │
@@ -37,7 +37,7 @@ A Nim vector search engine that turns text into **10240-bit sparse fingerprints*
       ▼             ▼
 ┌──────────┐   ┌─────────────────────────┐
 │ parentId │   │ for each chunkText:     │
-│ =chunkId │   │   allocSlot() → chunkId │
+│ =chunkId │   │   allocId() → chunkId   │
 │ encodeSdr│   │   encodeSdr() → fp      │
 │ writeFp  │   │   writeFingerprint()    │
 │ lshInsert│   │   lshInsert()           │
@@ -157,7 +157,7 @@ A Nim vector search engine that turns text into **10240-bit sparse fingerprints*
         │ │  edges     │
         │ ├─ removeLsh │
         │ ├─ removeLex │
-        │ ├─ freeSlot  │
+        │ ├─ freeId    │
         │ └─ del map   │
         └──────┬───────┘
                ▼

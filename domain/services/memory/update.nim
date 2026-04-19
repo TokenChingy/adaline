@@ -49,7 +49,7 @@ proc updateMemory*(service: var MemoryService; parentId: uint64; content: string
                service.hnswReverseIndex)
   else:
     for chunkText in chunks:
-      let chunkId = storage.allocSlot()
+      let chunkId = storage.allocId()
       service.chunkToParent[chunkId] = parentId
       discard storage.appendChunkMapping(parentId, chunkId)
 

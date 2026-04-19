@@ -146,7 +146,7 @@ proc growFpStore*(storage: MmappedStorage; minCount: uint64) =
   writeHeader(f, h)
   f.close()
 
-  # Ensure graph store keeps pace (eliminates separate check in allocSlot)
+  # Ensure graph store keeps pace (eliminates separate check in allocId)
   if newCapacity > storage.graphCapacity:
     storage.growGraphStore(newCapacity)
 
@@ -293,7 +293,7 @@ proc writeFingerprint*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprin
           unsafeAddr fp, sizeof(Fingerprint))
 
 proc writeFingerprintUnsafe*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprint) {.inline.} =
-  ## Skip capacity check — caller must have ensured capacity (e.g. via allocSlot).
+  ## Skip capacity check — caller must have ensured capacity (e.g. via allocId).
   let offset = memoryId * uint64(FingerprintBytes)
   copyMem(cast[pointer](cast[uint](storage.fpMem) + uint(offset)),
           unsafeAddr fp, sizeof(Fingerprint))
@@ -321,7 +321,7 @@ proc syncHeader*(storage: MmappedStorage) =
   writeHeader(f, h)
   f.close()
 
-proc allocSlot*(storage: MmappedStorage): uint64 =
+proc allocId*(storage: MmappedStorage): uint64 =
   ## Allocate a slot from the freelist or by appending. Returns slot index.
   if storage.freelistHead != FreelistNull:
     result = storage.freelistHead
@@ -335,21 +335,21 @@ proc allocSlot*(storage: MmappedStorage): uint64 =
     if result >= storage.fpCapacity:
       storage.growFpStore(result + 1)
 
-proc freeSlot*(storage: MmappedStorage; slot: uint64) =
+proc freeId*(storage: MmappedStorage; id: uint64) =
   ## Return a slot to the freelist.
   let nextPtr = cast[ptr uint64](cast[pointer](
-    cast[uint](storage.fpMem) + uint(slot * uint64(FingerprintBytes))))
+    cast[uint](storage.fpMem) + uint(id * uint64(FingerprintBytes))))
   nextPtr[] = storage.freelistHead
-  storage.freelistHead = slot
+  storage.freelistHead = id
   storage.freelistCount.inc
   # Mark graph node as deleted (layerCount = 0)
-  let node = storage.getHnswNodePtr(slot)
+  let node = storage.getHnswNodePtr(id)
   clearNode(node)
 
-proc slotCount*(storage: MmappedStorage): uint64 =
+proc idCount*(storage: MmappedStorage): uint64 =
   result = storage.recordCount
 
-proc freeSlotCount*(storage: MmappedStorage): uint64 =
+proc freeIdCount*(storage: MmappedStorage): uint64 =
   result = storage.freelistCount
 
 proc syncRecordCount*(storage: MmappedStorage; count: uint64) =
