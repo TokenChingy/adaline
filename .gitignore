@@ -33,12 +33,13 @@ Thumbs.db
 benchmarks/data/*
 benchmarks/scifact.zip
 benchmarks/nfcorpus.zip
+benchmarks/arguana.zip
+benchmarks/data/longmemeval_s_cleaned.json
 
 # Runtime files
 *.bin
 
 # Benchmark data downloads
-benchmarks/data/longmemeval_s_cleaned.json
 nimble.develop
 nimble.paths
 nimbledeps
