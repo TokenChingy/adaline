@@ -39,3 +39,6 @@ benchmarks/nfcorpus.zip
 
 # Benchmark data downloads
 benchmarks/data/longmemeval_s_cleaned.json
+nimble.develop
+nimble.paths
+nimbledeps
