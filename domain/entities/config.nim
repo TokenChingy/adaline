@@ -21,7 +21,6 @@ type
     contextProbes*: int
 
     # Fingerprint LSH parameters (GoldFinger-style direct banding)
-    minHashFunctions*: int
     lshBands*: int
     lshRows*: int
 
@@ -64,7 +63,6 @@ proc defaultEngineConfig*(): EngineConfig =
     tokenBigramProbes: 2,
     bigramProbes: 2,
     contextProbes: 2,
-    minHashFunctions: 100,
     lshBands: 50,
     lshRows: 2,
     hnswMaxLayers: 8,

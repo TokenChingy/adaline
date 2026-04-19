@@ -7,16 +7,16 @@
 
 | Metric | Old Baseline | After Changes | Δ |
 |--------|-------------|---------------|---|
-| R@1 | 40.58% | **43.25%** | +2.67pp |
-| R@5 | 61.08% | **61.47%** | +0.39pp |
-| R@10 | 68.83% | **68.06%** | −0.77pp |
-| R@100 | 86.71% | **88.04%** | +1.33pp |
-| MRR | 0.5182 | **0.5361** | +0.0179 |
-| MAP | 0.5071 | **0.5242** | +0.0171 |
-| nDCG@10 | 0.5480 | **0.5591** | +0.0111 |
-| Index docs/s | 1,732 | **2,673** | +54% |
-| Query q/s | 241 | **231** | −4% |
-| Query P50 | 4.19 ms | **4.38 ms** | +0.19 ms |
+| R@1 | 40.58% | **41.50%** | +0.92pp |
+| R@5 | 61.08% | **61.58%** | +0.50pp |
+| R@10 | 68.83% | **67.72%** | −1.11pp |
+| R@100 | 86.71% | **88.12%** | +1.41pp |
+| MRR | 0.5182 | **0.5255** | +0.0073 |
+| MAP | 0.5071 | **0.5154** | +0.0083 |
+| nDCG@10 | 0.5480 | **0.5514** | +0.0034 |
+| Index docs/s | 1,732 | **2,811** | +62% |
+| Query q/s | 241 | **226** | −6% |
+| Query P50 | 4.19 ms | **4.43 ms** | +0.24 ms |
 
 ## What Changed
 
@@ -31,7 +31,7 @@ proc hashFeature(feature: string; seed: uint64 = 0): uint64
 proc probeBlock(fp, feature, count, baseBit, sizeBits)
 ```
 
-**Impact:** Insert speed ↑ 54% (removed SplitMix64 overhead). Semantic quality roughly unchanged for SciFact because the core issue is vocabulary mismatch, not hash randomness.
+**Impact:** Insert speed ↑ 62% (removed SplitMix64 overhead). Semantic quality roughly unchanged for SciFact because the core issue is vocabulary mismatch, not hash randomness.
 
 ### 2. Prefix/Suffix Token Features
 
@@ -53,7 +53,7 @@ Queries are encoded with `isQuery = true`, which applies a `queryProbeMultiplier
 proc bandHash(fp: ptr Fingerprint; bandId, rows: int): uint64
 ```
 
-**Impact:** Insert speed ↑ significantly. LSH is now simpler, faster, and avoids the MinHash approximation error.
+**Impact:** Insert speed ↑ significantly. LSH is now simpler, faster, and avoids the MinHash approximation error. The `minHashFunctions` config field was removed.
 
 ### 5. HNSW `searchLayer` Best-First Fix
 
@@ -61,27 +61,25 @@ proc bandHash(fp: ptr Fingerprint; bandId, rows: int): uint64
 
 **Impact:** +1.5pp R@1 on the old baseline. Graph edges now link to actual nearest neighbors.
 
-### 6. Pluggable Similarity Metrics
-
-Switched to deterministic Jenkins-style hashing with prefix/suffix probing for morphological robustness.
-
-**Impact:** Overlap gives the best full-system R@1 for SciFact.
-
-### 7. Weighted RRF
+### 6. Weighted RRF
 
 Added `semanticRrfWeight` and `lexicalRrfWeight` to `mergeRrf`.
 
-**Observation:** For SciFact, any semantic weight > 0 hurts R@1 because the semantic lane is weak (R@1 ≈ 7%). Lexical-only achieves 43.3%. The default keeps `semanticWeight = 0.5` for datasets where semantic is stronger.
+**Observation:** For SciFact, any semantic weight > 0 hurts R@1 because the semantic lane is weak (R@1 ≈ 7%). Lexical-only achieves ~43%. The default keeps `semanticWeight = 0.5` for datasets where semantic is stronger.
 
-### 8. Dynamic Segment Boundaries
+### 7. Dynamic Segment Boundaries
 
 Segment positions (token/bigram/context blocks) are derived from `cfg.tokenBits/bigramBits/contextBits` instead of hardcoded constants. Block sizes are now fully configurable.
 
 ## What Did NOT Change (and why)
 
-- **Brute-force semantic path:** Added and then removed. It scored all chunks exactly but polluted RRF with low-quality candidates, dropping full-system R@1 from 43.3% to 38.6%. LSH + HNSW naturally filters to a smaller, higher-quality candidate pool.
+- **Brute-force semantic path:** Added and then removed. It scored all chunks exactly but polluted RRF with low-quality candidates, dropping full-system R@1. LSH + HNSW naturally filters to a smaller, higher-quality candidate pool.
 - **BM25 backend:** User explicitly rejected this.
 - **Fingerprint size:** Remains 10240 bits. Larger fingerprints would help but require invasive type changes.
+
+## Removed During Cleanup
+
+- **Pluggable similarity metrics (Dice, Cosine, Overlap):** Added during investigation then removed. Performance difference vs Jaccard was within noise on both SciFact and LongMemEval-S. Keeping only Jaccard reduces surface area.
 
 ## Files Changed
 
@@ -93,11 +91,11 @@ Segment positions (token/bigram/context blocks) are derived from `cfg.tokenBits/
 | `domain/algorithms/hnsw_graph.nim` | Best-first fix |
 | `domain/algorithms/weighted_jaccard.nim` | Regional weighted Jaccard only (simplified) |
 | `domain/algorithms/rrf_merger.nim` | Weighted RRF |
-| `domain/entities/config.nim` | New fields: queryProbeMultiplier, semanticRrfWeight, lexicalRrfWeight; LSH defaults 50×2 |
+| `domain/entities/config.nim` | New fields: queryProbeMultiplier, semanticRrfWeight, lexicalRrfWeight; removed minHashFunctions; LSH defaults 50×2 |
 | `domain/entities/fingerprint.nim` | Dynamic segment boundaries |
 | `domain/services/memory_service.nim` | Uses deterministic hash, GoldFinger LSH, weighted RRF |
 | `tests/domain/test_fingerprint_lsh.nim` | **New** |
 | `tests/domain/test_minhash_lsh.nim` | **Deleted** |
-| `BENCHMARK.md` | Updated SciFact numbers |
+| `BENCHMARK.md` | Updated SciFact and LongMemEval numbers |
 | `README.md` | Updated architecture docs |
 | `AGENTS.md` | Updated description |
