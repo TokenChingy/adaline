@@ -121,14 +121,14 @@ proc printUsage() =
 Adaline LongMemEval Benchmark
 
 Usage:
-  benchmark_longmemeval [topK]
+  longmemeval [topK]
 
 Options:
   topK    Number of results to retrieve (default: 10)
 
 Examples:
-  benchmark_longmemeval
-  benchmark_longmemeval 5
+  longmemeval
+  longmemeval 5
 """
 
 when isMainModule:

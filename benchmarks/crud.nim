@@ -22,7 +22,7 @@ proc runCrudBenchmark*(datasetName: string; deleteCount, updateCount: int) =
   let dataDir = "benchmarks/" & datasetName
   if not dirExists(dataDir):
     echo "Dataset not found: ", dataDir
-    echo "Run ./benchmarks/benchmark_beir ", datasetName, " first to download."
+    echo "Run ./benchmarks/beir ", datasetName, " first to download."
     quit(1)
 
   let corpus = loadCorpus(dataDir)
@@ -104,11 +104,11 @@ proc printUsage() =
 Adaline CRUD Benchmark
 
 Usage:
-  benchmark_crud <dataset> [delete_count] [update_count]
+  crud <dataset> [delete_count] [update_count]
 
 Examples:
-  benchmark_crud scifact 1000 1000
-  benchmark_crud nfcorpus 500 500
+  crud scifact 1000 1000
+  crud nfcorpus 500 500
 """
 
 proc main() =

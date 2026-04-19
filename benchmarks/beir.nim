@@ -229,7 +229,7 @@ proc printUsage() =
 Adaline BEIR Benchmark
 
 Usage:
-  benchmark_beir <dataset>
+  beir <dataset>
 
 Supported datasets:
   scifact   - Scientific fact verification (default, ~5K docs)
@@ -237,9 +237,9 @@ Supported datasets:
   msmarco   - MS MARCO passage retrieval (~8.8M docs, 1GB+ download)
 
 Examples:
-  benchmark_beir scifact
-  benchmark_beir nfcorpus
-  benchmark_beir msmarco
+  beir scifact
+  beir nfcorpus
+  beir msmarco
 """
 
 proc main() =

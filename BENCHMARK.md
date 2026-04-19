@@ -13,9 +13,9 @@ nimble benchmark
 ### BEIR (insert + query + quality)
 
 ```bash
-./benchmarks/benchmark_beir scifact    # ~5K docs, fast
-./benchmarks/benchmark_beir nfcorpus   # ~3.6K docs, fast
-./benchmarks/benchmark_beir msmarco    # ~8.8M docs, very slow, 1GB+ download
+./benchmarks/beir scifact    # ~5K docs, fast
+./benchmarks/beir nfcorpus   # ~3.6K docs, fast
+./benchmarks/beir msmarco    # ~8.8M docs, very slow, 1GB+ download
 ```
 
 Datasets auto-download on first run and cache in `benchmarks/<name>/`.
@@ -24,14 +24,14 @@ Datasets auto-download on first run and cache in `benchmarks/<name>/`.
 
 ```bash
 python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='xiaowu0162/longmemeval-cleaned', filename='longmemeval_s_cleaned.json', repo_type='dataset', local_dir='benchmarks/data')"
-./benchmarks/benchmark_longmemeval
+./benchmarks/longmemeval
 ```
 
 ### CRUD (delete + update throughput)
 
 ```bash
-nim c -d:release -o:benchmarks/benchmark_crud benchmarks/benchmark_crud.nim
-./benchmarks/benchmark_crud scifact 1000 1000
+nim c -d:release -o:benchmarks/crud benchmarks/crud.nim
+./benchmarks/crud scifact 1000 1000
 ```
 
 ---
@@ -155,6 +155,8 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 
 500 questions. Each has ~53 conversation sessions (~115K tokens).
 
+> **Note:** The numbers below measure only the **retrieval component** — whether the correct session(s) appear in the top-k results. The official LongMemEval benchmark is a generation + LLM-as-judge task that scores answer correctness, not retrieval recall. These results show how well Adaline retrieves relevant context, but they are not directly comparable to published LongMemEval accuracy scores.
+
 ### Retrieval Quality
 
 | Metric | Value |
@@ -188,7 +190,7 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 Supported but not benchmarked due to scale (~8.8M passages, ~1 GB download, ~11 GB fingerprints, ~18 GB graph).
 
 ```bash
-./benchmarks/benchmark_beir msmarco
+./benchmarks/beir msmarco
 ```
 
 At 8.8M docs, each query visits roughly `64 × log(N)` ≈ 1,000–2,000 nodes. The bottleneck shifts to memory bandwidth (cold node access) and WAL replay time on startup.

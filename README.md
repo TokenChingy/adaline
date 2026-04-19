@@ -339,10 +339,10 @@ nimble test
 
 # Benchmarks
 nimble benchmark
-./benchmarks/benchmark_beir scifact
-./benchmarks/benchmark_beir nfcorpus
-./benchmarks/benchmark_longmemeval
-./benchmarks/benchmark_crud scifact 1000 1000
+./benchmarks/beir scifact
+./benchmarks/beir nfcorpus
+./benchmarks/longmemeval
+./benchmarks/crud scifact 1000 1000
 ```
 
 ---

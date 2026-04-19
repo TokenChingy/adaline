@@ -19,8 +19,8 @@ task python, "Build Python bindings":
   exec "nim c -d:release --app:lib --path:\"" & nimpyPath & "\" -o:bindings/adaline.so bindings/adaline.nim"
 
 task benchmark, "Compile benchmarks in release mode":
-  exec "nim c -d:release -o:benchmarks/benchmark_beir benchmarks/benchmark_beir.nim"
-  exec "nim c -d:release -o:benchmarks/benchmark_longmemeval benchmarks/benchmark_longmemeval.nim"
+  exec "nim c -d:release -o:benchmarks/beir benchmarks/beir.nim"
+  exec "nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim"
 
 task test, "Compile and run all tests":
   for f in @[
