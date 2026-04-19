@@ -63,7 +63,6 @@ Use Cases ← Domain ← Infrastructure
 - **Delete / Update:** `deleteMemory()` and `updateMemory()` use an in-memory reverse edge index to heal HNSW neighbor lists without tombstones or full rebuilds
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
 - **Python bindings:** `bindings/adaline.nim` exposes `Engine` (insert, search, update, delete, stats, checkpoint) via nimpy. Build with `nimble python`.
-- **Operation flows:** See `FLOW.md` for Mermaid diagrams and step-by-step walkthroughs of insert, search, update, delete, and checkpoint.
 
 ## Agent hygiene
 
