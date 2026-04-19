@@ -13,168 +13,281 @@ A Nim vector search engine that turns text into **10240-bit sparse fingerprints*
 
 ### Insert
 
-```
-    ┌─────────┐
-    │  insert │
-    │(content)│
-    └────┬────┘
-         ▼
-    ┌─────────────────┐
-    │ allocId()       │──▶ parentId
-    │ appendWal()     │
-    │ textCache[id]   │
-    │ corpus.add()    │
-    └────────┬────────┘
-             ▼
-    ┌─────────────────┐
-    │ splitIntoChunks │
-    └────────┬────────┘
-             │
-      ┌──────┴──────┐
-      │             │
-  1 chunk       >1 chunks
-      │             │
-      ▼             ▼
-┌──────────┐   ┌─────────────────────────┐
-│ parentId │   │ for each chunkText:     │
-│ =chunkId │   │   allocId() → chunkId   │
-│ encodeSdr│   │   encodeSdr() → fp      │
-│ writeFp  │   │   writeFingerprint()    │
-│ lshInsert│   │   lshInsert()           │
-│ lexAdd   │   │   lexicalAdd()          │
-│ hnswIns  │   │   hnswInsert()          │
-└──────────┘   └─────────────────────────┘
-```
+Takes a text string, writes it to the WAL, and indexes it across three lanes:
+an LSH index (for seeding), an HNSW graph (for approximate search), and a
+lexical inverted index (for token matching). Long text is automatically split
+into sentence-aware chunks; each chunk gets its own fingerprint and graph node.
 
-1. Allocate a dense slot (`parentId`).
-2. Append `(parentId, timestamp, content)` to `wal.bin`.
-3. Update `textCache` and `corpus` document-frequency table.
-4. Chunk if any fingerprint block exceeds saturation.
-5. For each chunk: encode SDR → write fingerprint → insert into LSH → add to lexical index → insert into HNSW graph.
+```
+  INPUT: content (string)
+         │
+         ▼
+  ┌─────────────────────────────────────────┐
+  │ 1. ALLOCATE PARENT ID                   │
+  │    allocId() ──▶ parentId (uint64)      │
+  │                                         │
+  │ 2. WRITE-AHEAD LOG (durability)         │
+  │    wal.bin  += (parentId, timestamp,    │
+  │                content)                 │
+  │                                         │
+  │ 3. UPDATE IN-MEMORY TABLES              │
+  │    textCache[parentId] = content        │
+  │    timestampCache[parentId] = now       │
+  │    corpus.addMemory(content)            │
+  │      └─▶ updates doc-freq / IDF tables  │
+  └────────────────────┬────────────────────┘
+                       ▼
+  ┌─────────────────────────────────────────┐
+  │ 4. CHUNKING                             │
+  │    splitIntoChunks(content, cfg)        │
+  │                                         │
+  │    ┌─ short text ──┐   ┌─ long text ─┐ │
+  │    │ 1 chunk only  │   │ N chunks    │ │
+  │    │ (no split)    │   │ (sentence-  │ │
+  │    └───────┬───────┘   │  aware)     │ │
+  │            │           └──────┬──────┘ │
+  └────────────┼──────────────────┼────────┘
+               │                  │
+               ▼                  ▼
+      ┌──────────────┐   ┌──────────────────────────┐
+      │ parentId IS  │   │ for each chunkText:      │
+      │ the chunkId  │   │   allocId() → chunkId    │
+      │              │   │                          │
+      │ encodeSdr()  │   │   chunkToParent[chunkId] │
+      │   10240-bit  │   │     = parentId           │
+      │   fingerprint│   │   chunks.bin += mapping  │
+      │              │   │                          │
+      │ write to:    │   │   encodeSdr() → fp       │
+      │ fingerprints │   │     10240-bit fingerprint│
+      │ .bin[slot]   │   │   write to:              │
+      │              │   │   fingerprints.bin[slot] │
+      │ lshInsert()  │   │                          │
+      │   buckets[   │   │   lshInsert()            │
+      │   band,hash] │   │     buckets[band,hash]   │
+      │              │   │     += chunkId           │
+      │ lexicalAdd() │   │                          │
+      │   postings[  │   │   lexicalAdd()           │
+      │   term] +=   │   │     postings[term]       │
+      │   (id,freq)  │   │     += (chunkId, freq)   │
+      │              │   │                          │
+      │ hnswInsert() │   │   hnswInsert()           │
+      │   graph.bin  │   │     graph.bin[slot]      │
+      │   [slot]     │   │     gets edges + layer   │
+      └──────────────┘   └──────────────────────────┘
+               │                  │
+               └────────┬─────────┘
+                        ▼
+              OUTPUT: parentId (uint64)
+```
 
 ### Search
 
-```
-    ┌─────────┐
-    │ search  │
-    │(query,k)│
-    └────┬────┘
-         ▼
-    ┌─────────────────┐
-    │ encodeSdr()     │──▶ qfp
-    │ (isQuery=true)  │
-    └────────┬────────┘
-             ▼
-    ┌─────────────────┐     ┌─────────────────┐
-    │ queryLsh()      │────▶│ searchHnsw()    │
-    │  (seedIds)      │     │ (semanticResults)│
-    └─────────────────┘     └─────────────────┘
-                                    │
-    ┌─────────────────┐             │
-    │ searchLexical() │─────────────┤
-    │ (lexicalResults)│             ▼
-    └─────────────────┘     ┌─────────────────┐
-                            │ mergeRrf()      │
-                            │ (mergedChunks)  │
-                            └────────┬────────┘
-                                     ▼
-                            ┌─────────────────┐
-                            │ chunks→parents  │
-                            │ dedupe + scores │
-                            └────────┬────────┘
-                                     ▼
-                            ┌─────────────────┐
-                            │ sort desc, trim │
-                            │ rerank()        │
-                            └────────┬────────┘
-                                     ▼
-                              seq[Memory]
-```
+Takes a query string, runs it through both a **semantic lane** (fingerprint
+similarity via HNSW) and a **lexical lane** (inverted index with QLM scoring),
+then fuses the two lists with Reciprocal Rank Fusion. Results are mapped from
+chunks back to parent memories, deduplicated, and reranked by term coverage.
 
-1. Encode query into a dense-query fingerprint.
-2. LSH band-hash query to get seed candidates.
-3. HNSW greedy search from seeds/entry point → semantic scores.
-4. Lexical inverted-index search with QLM + Dirichlet smoothing.
-5. RRF merge of both lanes.
-6. Chunk→parent mapping + deduplication.
-7. Sort, trim to `k`, rerank by term coverage.
+```
+  INPUT: query (string), k (int)
+         │
+         ▼
+  ┌──────────────────────────────────────────┐
+  │ 1. QUERY FINGERPRINT                     │
+  │    encodeSdr(query, isQuery=true)        │
+  │      └─▶ denser probes than insert       │
+  │      └─▶ qfp (10240-bit fingerprint)     │
+  └────────────────────┬─────────────────────┘
+                       ▼
+         ┌─────────────┴──────────────┐
+         │                            │
+         ▼                            ▼
+  ┌─────────────────┐          ┌──────────────────┐
+  │ 2a. LSH SEEDS   │          │ 2b. HNSW SEARCH  │
+  │                 │          │                  │
+  │ queryLsh(qfp)   │──────▶   │ searchHnsw(      │
+  │   band-hash each│  seeds   │   seeds,         │
+  │   band of qfp   │  + entry │   entryPoint,    │
+  │   collect all   │  point   │   qfp, k, cfg)   │
+  │   colliding IDs │          │                  │
+  └─────────────────┘          │ greedy best-     │
+                               │ first descent    │
+                               │ per layer        │
+                               │                  │
+                               │ weighted Jaccard │
+                               │ vs. qfp          │
+                               └────────┬─────────┘
+                                        │
+  ┌─────────────────┐                   │
+  │ 3. LEXICAL LANE │◀──────────────────┘
+  │                 │
+  │ searchLexical(  │
+  │   query, k)     │
+  │                 │
+  │ tokenize query  │
+  │ score each doc  │
+  │ with QLM +      │
+  │ Dirichlet(mu)   │
+  └────────┬────────┘
+           │
+           ▼
+  ┌──────────────────────────────────────────┐
+  │ 4. FUSION                                │
+  │    mergeRrf(semanticResults,             │
+  │              lexicalResults,             │
+  │              k, rrfK,                    │
+  │              semWeight, lexWeight)       │
+  │                                          │
+  │    RRF formula:                          │
+  │    score = w_sem/(rrfK+rank_sem)         │
+  │          + w_lex/(rrfK+rank_lex)         │
+  │                                          │
+  │    Items in BOTH lanes get boosted       │
+  └────────────────────┬─────────────────────┘
+                       ▼
+  ┌──────────────────────────────────────────┐
+  │ 5. CHUNK → PARENT RESOLUTION             │
+  │    for each merged chunkId:              │
+  │      parentId = chunkToParent.getOrDef(  │
+  │                 chunkId, chunkId)        │
+  │    deduplicate by parent, keep max score │
+  └────────────────────┬─────────────────────┘
+                       ▼
+  ┌──────────────────────────────────────────┐
+  │ 6. RERANK                                │
+  │    sort by score desc                    │
+  │    trim to k                             │
+  │    rerank(query, candidates,             │
+  │           textCache, cfg)                │
+  │      └─▶ term-coverage boost             │
+  │      └─▶ exact match → top               │
+  └────────────────────┬─────────────────────┘
+                       ▼
+              OUTPUT: seq[Memory]
+                      {id, content, score, createdAt}
+```
 
 ### Update
 
+Preserves the parent ID while atomically replacing the content. The old chunks
+are deleted (healing the HNSW graph and freeing slots) and new chunks are
+inserted with the **same** parent ID.
+
 ```
-    ┌─────────────┐
-    │ updateMemory│
-    │(id, content)│
-    └──────┬──────┘
-           │
+  INPUT: id (uint64), content (string)
+         │
+         ▼
       ┌────┴────┐
-      │ known?  │
+      │ known?  │    ──▶  textCache.hasKey(id)
       └────┬────┘
        no / \ yes
           /   \
          ▼     ▼
-      (no-op)  ┌─────────────────┐
-               │ deleteMemory()  │
-               │ heal HNSW edges │
-               │ free slots      │
-               └────────┬────────┘
-                        ▼
-               ┌─────────────────┐
-               │ re-insert with  │
-               │ same parentId   │
-               │ WAL + chunk +   │
-               │ encode + index  │
-               └─────────────────┘
+      (no-op)  │
+               ▼
+  ┌──────────────────────────────────────────┐
+  │ 1. DELETE OLD                            │
+  │    deleteMemory(service, id)             │
+  │                                          │
+  │    ├─ find all chunkIds for this parent  │
+  │    ├─ heal HNSW forward edges            │
+  │    │   (remove from reverseIndex[N])     │
+  │    ├─ heal HNSW backward edges           │
+  │    │   (remove from predecessors' lists) │
+  │    ├─ remove from LSH buckets            │
+  │    ├─ remove from lexical postings       │
+  │    ├─ freeId(chunkId) ──▶ freelist       │
+  │    └─ del chunkToParent[chunkId]         │
+  │                                          │
+  │    └─ del textCache[id]                  │
+  │       del timestampCache[id]             │
+  └────────────────────┬─────────────────────┘
+                       ▼
+  ┌──────────────────────────────────────────┐
+  │ 2. INSERT NEW (same parentId)            │
+  │                                          │
+  │    wal.bin += (id, newTimestamp, content)│
+  │    textCache[id] = content               │
+  │    corpus.addMemory(content)             │
+  │    chunk, encode, index exactly like     │
+  │    Insert step 4-5 above                 │
+  │    ...but reuse parentId as root         │
+  └────────────────────┬─────────────────────┘
+                       ▼
+              OUTPUT: id (unchanged)
 ```
-
-1. Guard: no-op if `id` is unknown.
-2. Delete old chunks (heals graph, frees slots).
-3. Insert new content with the **same** `parentId`.
 
 ### Delete
 
+Physically removes a memory and all its chunks from every index. Uses an
+in-memory **reverse edge index** to heal HNSW neighbor lists so no orphaned
+references remain. Freed IDs go to a freelist for reuse.
+
 ```
-    ┌─────────────┐
-    │ deleteMemory│
-    │   (id)      │
-    └──────┬──────┘
-           │
+  INPUT: id (uint64)
+         │
+         ▼
       ┌────┴────┐
-      │ known?  │
+      │ known?  │    ──▶  textCache.hasKey(id)
       └────┬────┘
        no / \ yes
           /   \
          ▼     ▼
-      (no-op)  │ collect chunkIds
-               │ for parent
+      (no-op)  │
                ▼
-        ┌──────────────┐
-        │ for each     │
-        │ chunkId:     │
-        │ ├─ heal fwd  │
-        │ │  edges     │
-        │ ├─ heal bwd  │
-        │ │  edges     │
-        │ ├─ removeLsh │
-        │ ├─ removeLex │
-        │ ├─ freeId    │
-        │ └─ del map   │
-        └──────┬───────┘
-               ▼
-        ┌──────────────┐
-        │ del caches   │
-        │ syncHeader() │
-        └──────────────┘
+  ┌──────────────────────────────────────────┐
+  │ 1. COLLECT CHUNKS                        │
+  │    chunkIds = all entries in             │
+  │    chunkToParent where value == id       │
+  │                                          │
+  │    (if none, treat parent as unchunked   │
+  │     and use id itself)                   │
+  └────────────────────┬─────────────────────┘
+                       ▼
+  ┌──────────────────────────────────────────┐
+  │ 2. FOR EACH CHUNK                        │
+  │                                          │
+  │    ├─ HEAL FORWARD EDGES                 │
+  │    │  for each layer of chunk's node:    │
+  │    │    for each neighbor N:             │
+  │    │      reverseIndex[N].del(chunkId)   │
+  │    │                                     │
+  │    ├─ HEAL BACKWARD EDGES                │
+  │    │  for each M in reverseIndex[chunkId]│
+  │    │    for each layer of M's node:      │
+  │    │      removeNeighbor(M, layer,       │
+  │    │                     chunkId)        │
+  │    │  del reverseIndex[chunkId]          │
+  │    │                                     │
+  │    ├─ REMOVE FROM LSH                    │
+  │    │  removeLsh(lsh, fpPtr, chunkId)     │
+  │    │    re-hashes bands, removes id      │
+  │    │    from each bucket                 │
+  │    │                                     │
+  │    ├─ REMOVE FROM LEXICAL                │
+  │    │  removeMemory(lexical, chunkId,     │
+  │    │              chunkText)             │
+  │    │    decrements postings, corpus TF   │
+  │    │                                     │
+  │    ├─ FREE ID                            │
+  │    │  freeId(chunkId)                    │
+  │    │    push onto freelist (linked list  │
+  │    │    stored in fingerprint bytes 0-7) │
+  │    │    zero graph node                  │
+  │    │                                     │
+  │    └─ DELETE MAPPING                     │
+  │       del chunkToParent[chunkId]         │
+  └────────────────────┬─────────────────────┘
+                       ▼
+  ┌──────────────────────────────────────────┐
+  │ 3. CLEAN PARENT                          │
+  │    del textCache[id]                     │
+  │    del timestampCache[id]                │
+  │    syncHeader() ──▶ write recordCount +  │
+  │                     freelistHead to disk │
+  └────────────────────┬─────────────────────┘
+                       ▼
+              OUTPUT: id (now reusable)
 ```
-
-1. Guard: no-op if `id` is unknown.
-2. Collect all chunk IDs for the parent.
-3. For each chunk:
-   - Heal HNSW forward edges (remove from neighbors' reverse index).
-   - Heal HNSW backward edges (remove from predecessors' neighbor lists).
-   - Remove from LSH and lexical index.
-   - Free slot to freelist.
-4. Remove parent from caches and sync header.
 
 ### Checkpoint
 
