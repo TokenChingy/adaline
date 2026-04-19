@@ -4,6 +4,7 @@ import domain/entities/config
 import domain/entities/memory
 import use_cases/insert_memory
 import use_cases/search_memories
+import use_cases/update_memory
 
 const
   AppName = "Adaline"
@@ -18,12 +19,16 @@ Usage:
 
 Commands:
   insert <text>           Insert a memory (text from argument)
+  update <id> <text>      Update a memory by ID
+  delete <id>             Delete a memory by ID
   search <query> [k]      Search memories (default k=10)
   stats                   Show index statistics
   help                    Show this help message
 
 Examples:
   adaline insert "The quick brown fox"
+  adaline update 0 "Updated text"
+  adaline delete 0
   adaline search "quick fox" 5
 """
 
@@ -34,6 +39,13 @@ proc formatTimestamp(ts: uint64): string =
   if ts == 0: return "unknown"
   let dt = fromUnix(int64(ts))
   return dt.format("yyyy-MM-dd HH:mm:ss")
+
+proc parseId(s: string): uint64 =
+  try:
+    result = uint64(parseInt(s))
+  except ValueError:
+    stderr.writeLine("Error: invalid ID: ", s)
+    quit(1)
 
 proc cmdInsert(args: seq[string]) =
   let dataDir = getDataDir()
@@ -52,6 +64,40 @@ proc cmdInsert(args: seq[string]) =
   let output = insertMemory(service, InsertMemoryInput(content: content))
   let ts = service.timestampCache.getOrDefault(output.memoryId, 0)
   echo "Inserted: id=", output.memoryId, " at ", formatTimestamp(ts)
+  echo "Total indexed: ", service.textCache.len, " memories"
+
+proc cmdUpdate(args: seq[string]) =
+  let dataDir = getDataDir()
+  let cfg = defaultEngineConfig()
+  var service = initMemoryService(dataDir, cfg)
+
+  if args.len < 2:
+    stderr.writeLine("Error: update requires <id> <text>")
+    quit(1)
+
+  let id = parseId(args[0])
+  let content = args[1..^1].join(" ").strip()
+  if content.len == 0:
+    stderr.writeLine("Error: no content to update")
+    quit(1)
+
+  updateMemory(service, UpdateMemoryInput(memoryId: id, content: content))
+  let ts = service.timestampCache.getOrDefault(id, 0)
+  echo "Updated: id=", id, " at ", formatTimestamp(ts)
+  echo "Total indexed: ", service.textCache.len, " memories"
+
+proc cmdDelete(args: seq[string]) =
+  let dataDir = getDataDir()
+  let cfg = defaultEngineConfig()
+  var service = initMemoryService(dataDir, cfg)
+
+  if args.len == 0:
+    stderr.writeLine("Error: delete requires <id>")
+    quit(1)
+
+  let id = parseId(args[0])
+  service.deleteMemory(id)
+  echo "Deleted: id=", id
   echo "Total indexed: ", service.textCache.len, " memories"
 
 proc cmdSearch(args: seq[string]) =
@@ -137,6 +183,10 @@ proc main() =
   case cmd
   of "insert":
     cmdInsert(rest)
+  of "update":
+    cmdUpdate(rest)
+  of "delete":
+    cmdDelete(rest)
   of "search":
     cmdSearch(rest)
   of "stats":

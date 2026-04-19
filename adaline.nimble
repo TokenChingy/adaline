@@ -31,6 +31,7 @@ task test, "Compile and run all tests":
     "tests/domain/test_chunker.nim",
     "tests/domain/test_memory_service.nim",
     "tests/use_cases/test_insert_memory.nim",
-    "tests/use_cases/test_search_memories.nim"
+    "tests/use_cases/test_search_memories.nim",
+    "tests/use_cases/test_update_memory.nim"
   ]:
     exec "nim c -r " & f

@@ -3,7 +3,7 @@
 A Nim vector search engine that turns text into **10240-bit sparse fingerprints** and searches them with HNSW + LSH, plus a lexical index for token-based matching. Results are fused with Reciprocal Rank Fusion and reranked by term coverage.
 
 - **Conditional chunking** — long text splits into sentence-aware chunks when fingerprints approach saturation
-- **Delete & reuse** — `deleteMemory()` removes from all indexes and returns slots to a freelist
+- **Delete & update** — `deleteMemory()` physically heals HNSW edges via a reverse edge index, removes from all indexes, and returns slots to a freelist. `updateMemory()` preserves the parent ID while replacing content.
 - **Checkpoint / fast restart** — `checkpoint()` persists indexes to disk; restarts only replay WAL after the checkpoint
 - **Single binary, no dependencies** — memory-mapped files, no external services
 
@@ -39,6 +39,10 @@ nimble build_release
 ./adaline insert "The quick brown fox"
 ./adaline insert "Nim is a systems programming language"
 
+# Update / Delete
+./adaline update 0 "Updated text"
+./adaline delete 1
+
 # Search
 ./adaline search "quick fox" 5
 
@@ -53,6 +57,7 @@ nimble benchmark
 ./benchmarks/benchmark_beir scifact
 ./benchmarks/benchmark_beir nfcorpus
 ./benchmarks/benchmark_longmemeval
+./benchmarks/benchmark_crud scifact 1000 1000
 ```
 
 ---
@@ -63,8 +68,8 @@ Apple MacBook Air M2 (16 GB). Full tables and methodology in [`BENCHMARK.md`](BE
 
 | Dataset | Corpus | Indexing | Query (top-100) | nDCG@10 | R@5 |
 |---------|--------|----------|-----------------|---------|-----|
-| SciFact | 5,183 docs | 2,452 docs/s | 226 q/s | 0.561 | — |
-| NFCorpus | 3,633 docs | 2,318 docs/s | 366 q/s | 0.277 | — |
+| SciFact | 5,183 docs | 2,350 docs/s | 223 q/s | 0.557 | — |
+| NFCorpus | 3,633 docs | 2,175 docs/s | 361 q/s | 0.277 | — |
 | LongMemEval-S | 500 questions | — | — | — | 94.6% |
 
 SciFact: Recall@1 = 43.3%, MRR = 0.54. P50 latency ~4.4 ms for top-100.
@@ -99,6 +104,6 @@ LongMemEval-S: R@1 = 78.2%, R@5 = 94.6%. Conversational memory retrieval.
 
 Dependency flow: `Use Cases ← Domain ← Infrastructure`. Domain services call into `infrastructure/` directly. Not Clean Architecture — simplicity and performance over strict layers.
 
-**Delete:** `deleteMemory()` removes from LSH, lexical, and HNSW. The slot goes to a freelist. HNSW nodes are marked `layerCount = 0` so traversal skips them. WAL does not persist tombstones; deleted memories reappear on restart until `checkpoint()` is called.
+**Delete / Update:** `deleteMemory()` removes from LSH, lexical, and HNSW. An in-memory reverse edge index heals HNSW neighbor lists so no orphaned edges remain. The slot goes to a freelist for reuse. `updateMemory()` deletes old chunks and inserts new ones, preserving the parent ID. Both are WAL-logged; restarts replay the log and rebuild all in-memory indexes. `checkpoint()` persists indexes to skip WAL replay on startup.
 
 **Chunking:** Long documents are split into sentence-aware chunks with one-sentence overlap. Each chunk gets its own fingerprint. Prevents saturation and keeps fingerprints sparse. Short documents stay single-chunk.

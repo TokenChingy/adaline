@@ -2,7 +2,7 @@ import ../entities/fingerprint
 import ../entities/hnsw_node
 import ../entities/config
 import weighted_jaccard
-import std/[heapqueue, sets, random, algorithm, tables]
+import std/[heapqueue, sets, random, algorithm, tables, sequtils]
 
 proc getFingerprintPtr*(fpMem: pointer; memoryId: uint64): ptr Fingerprint {.inline.} =
   let offset = memoryId * uint64(FingerprintBytes)
@@ -58,7 +58,8 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
     result[n - 1 - i] = (id, -negDist)
 
 proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint;
-                 cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64) =
+                 cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64;
+                 reverseIndex: var Table[uint64, seq[uint64]]) =
   let node = getHnswNodePtr(graphMem, memoryId)
   clearNode(node)
 
@@ -84,15 +85,19 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       selected.add(neighbors[i].id)
     setNeighbors(node, lc, selected)
 
+    # Forward edges: memoryId → selected. Record in reverse index.
+    for nid in selected:
+      reverseIndex.mgetOrPut(nid, @[]).add(memoryId)
+
     for nid in selected:
       let nnode = getHnswNodePtr(graphMem, nid)
-      var nneighbors = newSeq[uint64]()
+      var oldNeighbors = newSeq[uint64]()
       for nnid in nnode.neighbors(lc):
-        nneighbors.add(nnid)
-      nneighbors.add(memoryId)
+        oldNeighbors.add(nnid)
+      oldNeighbors.add(memoryId)
 
       var scored = newSeq[tuple[dist: float, id: uint64]]()
-      for nnid in nneighbors:
+      for nnid in oldNeighbors:
         let nnptr = getFingerprintPtr(fpMem, nnid)
         let d = 1.0 - weightedJaccard(getFingerprintPtr(fpMem, nid), nnptr, cfg)
         scored.add((d, nnid))
@@ -107,6 +112,20 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       for i in 0 ..< min(scored.len, cfg.hnswMaxNeighbors):
         kept.add(scored[i].id)
       setNeighbors(nnode, lc, kept)
+
+      # Update reverse index for edges that were dropped or kept by nid
+      for o in oldNeighbors:
+        if o notin kept:
+          # Edge nid → o was dropped; remove nid from reverse[o]
+          if reverseIndex.hasKey(o):
+            reverseIndex[o] = reverseIndex[o].filterIt(it != nid)
+      for k in kept:
+        if k == memoryId or k notin oldNeighbors[0 ..< oldNeighbors.len - 1]:
+          # Edge nid → k is new or retained; ensure nid is in reverse[k]
+          var list = reverseIndex.mgetOrPut(k, @[])
+          if nid notin list:
+            list.add(nid)
+            reverseIndex[k] = list
 
     if neighbors.len > 0:
       currEp = neighbors[0].id

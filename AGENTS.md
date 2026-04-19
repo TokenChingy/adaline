@@ -29,6 +29,8 @@ domain/services/    <- Pure domain orchestration (MemoryService).
  infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        graph store, chunks mapping store). Imported by domain
                        services when needed.
+benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark.
+tests/              <- Unit tests mirroring the folder layout.
 adaline.nim         <- The CLI entry point.
 ```
 
@@ -41,7 +43,7 @@ Use Cases ← Domain ← Infrastructure
 ```
 
 - **Use cases** only orchestrate. They do not contain domain rules.
-- **Domain** code (especially `MemoryService`) calls into `infrastructure/` (e.g. `MmappedStorage`).
+- **Domain** code (especially `MemoryService`) calls into `infrastructure/` (e.g., `MmappedStorage`).
 - **Infrastructure** sits at the bottom of the stack and is imported by domain services when needed.
 
 ## Stack
@@ -53,5 +55,14 @@ Use Cases ← Domain ← Infrastructure
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
 - **Merger:** Reciprocal Rank Fusion (RRF)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
-- **Delete:** `deleteMemory()` removes from all indexes and returns slots to freelist
+- **Delete / Update:** `deleteMemory()` and `updateMemory()` use an in-memory reverse edge index to heal HNSW neighbor lists without tombstones or full rebuilds
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
+
+## Agent hygiene
+
+Before finishing any task:
+
+1. **Remove dead code and files.** Delete design docs, scratch scripts, or temporary binaries created during exploration. Do not leave stale documentation that no longer matches the implementation.
+2. **Clean generated artifacts.** Remove benchmark data directories, test temp dirs, and compiled binaries that can be regenerated. (These are already in `.gitignore`, but purge them from the working tree too.)
+3. **Update living docs.** `AGENTS.md` and `BENCHMARK.md` must reflect the current codebase only. If you added a feature, benchmark, or test, add it to the relevant doc. If you removed something, remove it from the doc.
+4. **Run the full test suite.** `nimble test` must pass before you consider a task complete.

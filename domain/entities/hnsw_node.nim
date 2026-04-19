@@ -29,6 +29,18 @@ proc setNeighbors*(node: ptr HnswNode; layer: int; nids: seq[uint64]) =
     else:
       node.neighbors[start + i] = 0
 
+proc removeNeighbor*(node: ptr HnswNode; layer: int; targetId: uint64): bool =
+  ## Remove targetId from the neighbor list at the given layer.
+  ## Shifts remaining neighbors left. Returns true if found.
+  let start = layer * HnswMaxNeighbors
+  for i in 0 ..< HnswMaxNeighbors:
+    if node.neighbors[start + i] == targetId:
+      for j in (start + i) ..< (start + HnswMaxNeighbors - 1):
+        node.neighbors[j] = node.neighbors[j + 1]
+      node.neighbors[start + HnswMaxNeighbors - 1] = 0
+      return true
+  return false
+
 proc clearNode*(node: ptr HnswNode) =
   node.layerCount = 0
   node.entryLayer = 0

@@ -10,7 +10,7 @@ import ../algorithms/rrf_merger
 import ../algorithms/reranker
 import ../algorithms/chunker
 import ../../infrastructure/mmapped_storage
-import std/[tables, random, times, algorithm, os]
+import std/[tables, random, times, algorithm, os, sequtils]
 
 type
   MemoryService* = object
@@ -24,6 +24,7 @@ type
     textCache*: Table[uint64, string]
     timestampCache*: Table[uint64, uint64]
     chunkToParent*: Table[uint64, uint64]
+    hnswReverseIndex*: Table[uint64, seq[uint64]]
 
 proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig()): MemoryService =
   randomize()
@@ -37,6 +38,7 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   result.textCache = initTable[uint64, string]()
   result.timestampCache = initTable[uint64, uint64]()
   result.chunkToParent = initTable[uint64, uint64]()
+  result.hnswReverseIndex = initTable[uint64, seq[uint64]]()
 
   # Try loading persisted indexes
   let lshPath = dataDir / "lsh.bin"
@@ -122,6 +124,15 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   if hasData:
     result.storage.syncRecordCount(maxId + 1)
 
+  # Rebuild reverse edge index from graph
+  let slotCount = result.storage.recordCount
+  for slot in 0'u64 ..< slotCount:
+    let node = result.storage.getHnswNodePtr(slot)
+    if node.layerCount > 0:
+      for lc in 0 ..< int(node.layerCount):
+        for nid in node.neighbors(lc):
+          result.hnswReverseIndex.mgetOrPut(nid, @[]).add(slot)
+
 proc insert*(service: var MemoryService; content: string): uint64 =
   var storage = service.storage
   let parentId = storage.allocSlot()
@@ -152,7 +163,8 @@ proc insert*(service: var MemoryService; content: string): uint64 =
     addMemory(service.lexical, chunkId, content)
 
     insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-               service.cfg, service.maxHnswLayer, service.hnswEntryPoint)
+               service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+               service.hnswReverseIndex)
   else:
     # Chunked: create multiple indexable units
     for chunkText in chunks:
@@ -168,14 +180,14 @@ proc insert*(service: var MemoryService; content: string): uint64 =
       addMemory(service.lexical, chunkId, chunkText)
 
       insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint)
+                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+                 service.hnswReverseIndex)
 
   result = parentId
 
 proc deleteMemory*(service: var MemoryService; parentId: uint64) =
   ## Delete a memory and all its chunks. Frees slots for reuse.
-  ## Note: WAL does not currently persist tombstones; deleted memories
-  ## will reappear on restart until checkpointing is implemented.
+  ## Heals HNSW edges via reverse index so no orphaned references remain.
   if not service.textCache.hasKey(parentId):
     return
 
@@ -192,6 +204,24 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
     chunkIds.add(parentId)
 
   for chunkId in chunkIds:
+    # Heal HNSW graph: remove chunkId from all neighbor lists that reference it
+    let node = service.storage.getHnswNodePtr(chunkId)
+    if node.layerCount > 0:
+      # Forward edges: for each neighbor N of chunkId, remove chunkId from reverse[N]
+      for lc in 0 ..< int(node.layerCount):
+        for nid in node.neighbors(lc):
+          if service.hnswReverseIndex.hasKey(nid):
+            service.hnswReverseIndex[nid] = service.hnswReverseIndex[nid].filterIt(it != chunkId)
+
+      # Backward edges: for each node M that points to chunkId, remove chunkId from M's list
+      if service.hnswReverseIndex.hasKey(chunkId):
+        for mid in service.hnswReverseIndex[chunkId]:
+          let mnode = service.storage.getHnswNodePtr(mid)
+          if mnode.layerCount > 0:
+            for lc in 0 ..< int(mnode.layerCount):
+              discard removeNeighbor(mnode, lc, chunkId)
+        service.hnswReverseIndex.del(chunkId)
+
     # Remove from LSH (needs fingerprint before freeing slot)
     let fpPtr = service.storage.getFingerprintPtr(chunkId)
     removeLsh(service.lsh, fpPtr, chunkId)
@@ -213,6 +243,56 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
 
   # Sync header to disk after delete
   service.storage.syncHeader()
+
+proc updateMemory*(service: var MemoryService; parentId: uint64; content: string) =
+  ## Update a memory's content. Deletes old chunks and inserts new ones,
+  ## preserving the parent ID.
+  if not service.textCache.hasKey(parentId):
+    return
+
+  # Delete old chunks (heals graph, frees slots)
+  deleteMemory(service, parentId)
+
+  # Insert new content, reusing the same parentId
+  let timestamp = uint64(getTime().toUnix())
+  var storage = service.storage
+
+  # WAL: append update record
+  discard storage.appendWal(parentId, timestamp, content)
+  service.textCache[parentId] = content
+  service.timestampCache[parentId] = timestamp
+
+  # Update corpus
+  service.corpus.addMemory(content)
+
+  # Chunk and index
+  let chunks = splitIntoChunks(content, service.cfg)
+
+  if chunks.len == 1:
+    let chunkId = parentId
+    service.chunkToParent[chunkId] = parentId
+    discard storage.appendChunkMapping(parentId, chunkId)
+
+    var fp = encodeSdr(content, service.cfg, service.corpus)
+    storage.writeFingerprintUnsafe(chunkId, fp)
+    insertLsh(service.lsh, addr fp, chunkId)
+    addMemory(service.lexical, chunkId, content)
+    insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
+               service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+               service.hnswReverseIndex)
+  else:
+    for chunkText in chunks:
+      let chunkId = storage.allocSlot()
+      service.chunkToParent[chunkId] = parentId
+      discard storage.appendChunkMapping(parentId, chunkId)
+
+      var fp = encodeSdr(chunkText, service.cfg, service.corpus)
+      storage.writeFingerprintUnsafe(chunkId, fp)
+      insertLsh(service.lsh, addr fp, chunkId)
+      addMemory(service.lexical, chunkId, chunkText)
+      insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
+                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+                 service.hnswReverseIndex)
 
 proc checkpoint*(service: var MemoryService) =
   ## Persist in-memory indexes to disk so future restarts can skip WAL replay.
