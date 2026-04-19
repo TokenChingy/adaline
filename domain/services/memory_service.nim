@@ -5,7 +5,6 @@ import ../algorithms/sdr_encoder
 import ../algorithms/corpus_index
 import ../algorithms/fingerprint_lsh
 import ../algorithms/hnsw_graph
-import ../algorithms/weighted_jaccard
 import ../algorithms/lexical_index
 import ../algorithms/rrf_merger
 import ../algorithms/reranker

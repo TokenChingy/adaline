@@ -47,9 +47,6 @@ type
     # Chunking threshold (0.0–1.0); chunk when any block exceeds this saturation
     chunkSaturationThreshold*: float
 
-    # Similarity metric for fingerprint comparison
-    similarityMetric*: string
-
     # Multiplier for query probes (makes query fingerprints denser)
     queryProbeMultiplier*: float
 
@@ -80,6 +77,5 @@ proc defaultEngineConfig*(): EngineConfig =
     lexicalRrfWeight: 1.0,
     rerankCoverageWeight: 0.5,
     chunkSaturationThreshold: 0.6,
-    similarityMetric: "overlap",
     queryProbeMultiplier: 2.0,
   )

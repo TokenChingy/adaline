@@ -63,7 +63,7 @@ proc bandHash(fp: ptr Fingerprint; bandId, rows: int): uint64
 
 ### 6. Pluggable Similarity Metrics
 
-Added Dice, Cosine, and Overlap coefficients. Default switched to **Overlap** because it is less biased than Jaccard for query-document length mismatch.
+Switched to deterministic Jenkins-style hashing with prefix/suffix probing for morphological robustness.
 
 **Impact:** Overlap gives the best full-system R@1 for SciFact.
 
@@ -91,9 +91,9 @@ Segment positions (token/bigram/context blocks) are derived from `cfg.tokenBits/
 | `domain/algorithms/fingerprint_lsh.nim` | **New** — GoldFinger direct banding |
 | `domain/algorithms/minhash_lsh.nim` | **Deleted** |
 | `domain/algorithms/hnsw_graph.nim` | Best-first fix |
-| `domain/algorithms/weighted_jaccard.nim` | Dice/Cosine/Overlap + dynamic segments |
+| `domain/algorithms/weighted_jaccard.nim` | Regional weighted Jaccard only (simplified) |
 | `domain/algorithms/rrf_merger.nim` | Weighted RRF |
-| `domain/entities/config.nim` | New fields: similarityMetric, queryProbeMultiplier, semanticRrfWeight, lexicalRrfWeight; LSH defaults 50×2 |
+| `domain/entities/config.nim` | New fields: queryProbeMultiplier, semanticRrfWeight, lexicalRrfWeight; LSH defaults 50×2 |
 | `domain/entities/fingerprint.nim` | Dynamic segment boundaries |
 | `domain/services/memory_service.nim` | Uses deterministic hash, GoldFinger LSH, weighted RRF |
 | `tests/domain/test_fingerprint_lsh.nim` | **New** |

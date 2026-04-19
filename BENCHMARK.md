@@ -221,7 +221,7 @@ To run:
 
 ## Methodology Notes
 
-- **Distance metric**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context). Default similarity metric is **Overlap coefficient**.
+- **Distance metric**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
 - **Search path**: Fingerprint LSH seeds → HNSW layer-0 descent (efSearch=64).
 - **Lexical scoring**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
 - **Fusion**: Weighted Reciprocal Rank Fusion (k=60, semanticWeight=0.5, lexicalWeight=1.0).
