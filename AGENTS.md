@@ -6,7 +6,7 @@ Adaline is a Nim library for generating and querying **Sparse Distributed Repres
 
 Long memories are automatically **chunked** into multiple fingerprints when any block approaches saturation. Chunk-to-parent linkage is persisted in `chunks.bin`.
 
-The entire index is laid out as contiguous byte arrays on disk. The CLI casts pointers via `mmap` and immediately begins execution.
+The entire index is laid out as contiguous byte arrays on disk with 256-byte self-describing headers (`ADLN` magic). Store files use dense slot addressing (0, 1, 2…) rather than byte offsets, with pre-allocated 64 MiB growth chunks to minimize mmap remaps. A freelist enables slot reuse on delete. Persisted indexes (`lsh.bin`, `lexical.bin`, `corpus.bin`) allow fast startup by skipping full WAL replay. The CLI casts pointers via `mmap` and immediately begins execution.
 
 ## Folder layout
 
@@ -48,8 +48,10 @@ Use Cases ← Domain ← Infrastructure
 
 - **Language:** Nim
 - **Fingerprint size:** 10240 bits (1280 bytes)
-- **Storage:** Memory-mapped flat files (WAL, fingerprint store, graph store, chunks mapping store)
+- **Storage:** Memory-mapped flat files with self-describing headers (WAL, fingerprint store, graph store, chunks mapping store, persisted LSH/lexical/corpus indexes)
 - **Index / search structure:** Banded Fingerprint LSH + HNSW Graph
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
 - **Merger:** Reciprocal Rank Fusion (RRF)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
+- **Delete:** `deleteMemory()` removes from all indexes and returns slots to freelist
+- **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart

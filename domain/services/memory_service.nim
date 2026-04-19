@@ -123,11 +123,12 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
     result.storage.syncRecordCount(maxId + 1)
 
 proc insert*(service: var MemoryService; content: string): uint64 =
-  let parentId = service.storage.allocSlot()
+  var storage = service.storage
+  let parentId = storage.allocSlot()
   let timestamp = uint64(getTime().toUnix())
 
   # 1. WAL stores the parent memory
-  discard service.storage.appendWal(parentId, timestamp, content)
+  discard storage.appendWal(parentId, timestamp, content)
   service.textCache[parentId] = content
   service.timestampCache[parentId] = timestamp
 
@@ -141,34 +142,32 @@ proc insert*(service: var MemoryService; content: string): uint64 =
     # Unchunked: parent is its own chunk
     let chunkId = parentId
     service.chunkToParent[chunkId] = parentId
-    discard service.storage.appendChunkMapping(parentId, chunkId)
+    discard storage.appendChunkMapping(parentId, chunkId)
 
     var fp = encodeSdr(content, service.cfg, service.corpus)
-    service.storage.writeFingerprint(chunkId, fp)
+    storage.writeFingerprintUnsafe(chunkId, fp)
 
     insertLsh(service.lsh, addr fp, chunkId)
 
     addMemory(service.lexical, chunkId, content)
 
-    service.storage.ensureGraphCapacity(chunkId)
-    insertHnsw(service.storage.graphMem, service.storage.fpMem, chunkId, addr fp,
+    insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
                service.cfg, service.maxHnswLayer, service.hnswEntryPoint)
   else:
     # Chunked: create multiple indexable units
     for chunkText in chunks:
-      let chunkId = service.storage.allocSlot()
+      let chunkId = storage.allocSlot()
       service.chunkToParent[chunkId] = parentId
-      discard service.storage.appendChunkMapping(parentId, chunkId)
+      discard storage.appendChunkMapping(parentId, chunkId)
 
       var fp = encodeSdr(chunkText, service.cfg, service.corpus)
-      service.storage.writeFingerprint(chunkId, fp)
+      storage.writeFingerprintUnsafe(chunkId, fp)
 
       insertLsh(service.lsh, addr fp, chunkId)
 
       addMemory(service.lexical, chunkId, chunkText)
 
-      service.storage.ensureGraphCapacity(chunkId)
-      insertHnsw(service.storage.graphMem, service.storage.fpMem, chunkId, addr fp,
+      insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
                  service.cfg, service.maxHnswLayer, service.hnswEntryPoint)
 
   result = parentId

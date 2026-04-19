@@ -108,6 +108,25 @@ proc preallocateFile(path: string; recordSize: uint64; minSlots: uint64): uint64
 # Growth helpers
 # ---------------------------------------------------------------------------
 
+proc growGraphStore*(storage: MmappedStorage; minCount: uint64) =
+  if minCount <= storage.graphCapacity:
+    return
+  let graphPath = storage.dataDir / "graph.bin"
+  let newCapacity = preallocateFile(graphPath, uint64(sizeof(HnswNode)), minCount)
+
+  storage.graphMemFile.close()
+  let newSize = StoreHeaderSize + int(newCapacity * uint64(sizeof(HnswNode)))
+  storage.graphMemFile = memfiles.open(graphPath, mode = fmReadWrite, mappedSize = newSize)
+  storage.graphMem = cast[pointer](cast[uint](storage.graphMemFile.mem) + uint(StoreHeaderSize))
+  storage.graphCapacity = newCapacity
+
+  # Update header capacity
+  var f = system.open(graphPath, fmReadWriteExisting)
+  var h = readHeader(f)
+  h.capacity = newCapacity
+  writeHeader(f, h)
+  f.close()
+
 proc growFpStore*(storage: MmappedStorage; minCount: uint64) =
   if minCount <= storage.fpCapacity:
     return
@@ -127,24 +146,9 @@ proc growFpStore*(storage: MmappedStorage; minCount: uint64) =
   writeHeader(f, h)
   f.close()
 
-proc growGraphStore*(storage: MmappedStorage; minCount: uint64) =
-  if minCount <= storage.graphCapacity:
-    return
-  let graphPath = storage.dataDir / "graph.bin"
-  let newCapacity = preallocateFile(graphPath, uint64(sizeof(HnswNode)), minCount)
-
-  storage.graphMemFile.close()
-  let newSize = StoreHeaderSize + int(newCapacity * uint64(sizeof(HnswNode)))
-  storage.graphMemFile = memfiles.open(graphPath, mode = fmReadWrite, mappedSize = newSize)
-  storage.graphMem = cast[pointer](cast[uint](storage.graphMemFile.mem) + uint(StoreHeaderSize))
-  storage.graphCapacity = newCapacity
-
-  # Update header capacity
-  var f = system.open(graphPath, fmReadWriteExisting)
-  var h = readHeader(f)
-  h.capacity = newCapacity
-  writeHeader(f, h)
-  f.close()
+  # Ensure graph store keeps pace (eliminates separate check in allocSlot)
+  if newCapacity > storage.graphCapacity:
+    storage.growGraphStore(newCapacity)
 
 # ---------------------------------------------------------------------------
 # Init
@@ -277,22 +281,28 @@ proc replayChunks*(storage: MmappedStorage): seq[tuple[parentMemoryId: uint64, c
 # Fingerprint / Graph access (slot-addressed)
 # ---------------------------------------------------------------------------
 
-proc getFingerprintPtr*(storage: MmappedStorage; memoryId: uint64): ptr Fingerprint =
+proc getFingerprintPtr*(storage: MmappedStorage; memoryId: uint64): ptr Fingerprint {.inline.} =
   let offset = memoryId * uint64(FingerprintBytes)
-  result = cast[ptr Fingerprint](cast[pointer](cast[uint](storage.fpMem) + uint(offset)))
+  cast[ptr Fingerprint](cast[pointer](cast[uint](storage.fpMem) + uint(offset)))
 
-proc writeFingerprint*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprint) =
+proc writeFingerprint*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprint) {.inline.} =
   if memoryId >= storage.fpCapacity:
     storage.growFpStore(memoryId + 1)
   let offset = memoryId * uint64(FingerprintBytes)
   copyMem(cast[pointer](cast[uint](storage.fpMem) + uint(offset)),
           unsafeAddr fp, sizeof(Fingerprint))
 
-proc getHnswNodePtr*(storage: MmappedStorage; memoryId: uint64): ptr HnswNode =
-  let offset = memoryId * uint64(sizeof(HnswNode))
-  result = cast[ptr HnswNode](cast[pointer](cast[uint](storage.graphMem) + uint(offset)))
+proc writeFingerprintUnsafe*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprint) {.inline.} =
+  ## Skip capacity check — caller must have ensured capacity (e.g. via allocSlot).
+  let offset = memoryId * uint64(FingerprintBytes)
+  copyMem(cast[pointer](cast[uint](storage.fpMem) + uint(offset)),
+          unsafeAddr fp, sizeof(Fingerprint))
 
-proc ensureGraphCapacity*(storage: MmappedStorage; memoryId: uint64) =
+proc getHnswNodePtr*(storage: MmappedStorage; memoryId: uint64): ptr HnswNode {.inline.} =
+  let offset = memoryId * uint64(sizeof(HnswNode))
+  cast[ptr HnswNode](cast[pointer](cast[uint](storage.graphMem) + uint(offset)))
+
+proc ensureGraphCapacity*(storage: MmappedStorage; memoryId: uint64) {.inline.} =
   if memoryId >= storage.graphCapacity:
     storage.growGraphStore(memoryId + 1)
 
@@ -311,7 +321,7 @@ proc syncHeader*(storage: MmappedStorage) =
   writeHeader(f, h)
   f.close()
 
-proc allocSlot*(storage: MmappedStorage): uint64 {.inline.} =
+proc allocSlot*(storage: MmappedStorage): uint64 =
   ## Allocate a slot from the freelist or by appending. Returns slot index.
   if storage.freelistHead != FreelistNull:
     result = storage.freelistHead
@@ -324,9 +334,6 @@ proc allocSlot*(storage: MmappedStorage): uint64 {.inline.} =
     storage.recordCount.inc
     if result >= storage.fpCapacity:
       storage.growFpStore(result + 1)
-  # Ensure graph has capacity for this slot too
-  if result >= storage.graphCapacity:
-    storage.growGraphStore(result + 1)
 
 proc freeSlot*(storage: MmappedStorage; slot: uint64) =
   ## Return a slot to the freelist.

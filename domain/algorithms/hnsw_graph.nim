@@ -4,13 +4,13 @@ import ../entities/config
 import weighted_jaccard
 import std/[heapqueue, sets, random, algorithm, tables]
 
-proc getFingerprintPtr*(fpMem: pointer; memoryId: uint64): ptr Fingerprint =
+proc getFingerprintPtr*(fpMem: pointer; memoryId: uint64): ptr Fingerprint {.inline.} =
   let offset = memoryId * uint64(FingerprintBytes)
-  result = cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset)))
+  cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset)))
 
-proc getHnswNodePtr*(graphMem: pointer; memoryId: uint64): ptr HnswNode =
+proc getHnswNodePtr*(graphMem: pointer; memoryId: uint64): ptr HnswNode {.inline.} =
   let offset = memoryId * uint64(sizeof(HnswNode))
-  result = cast[ptr HnswNode](cast[pointer](cast[uint](graphMem) + uint(offset)))
+  cast[ptr HnswNode](cast[pointer](cast[uint](graphMem) + uint(offset)))
 
 proc randomLevel*(maxLayer: int): int =
   var lvl = 0
