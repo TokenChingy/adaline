@@ -2,11 +2,6 @@
 
 A Nim vector search engine that turns text into **10240-bit sparse fingerprints** and searches them with HNSW + LSH, plus a lexical index for token-based matching. Results are fused with Reciprocal Rank Fusion and reranked by term coverage.
 
-- **Conditional chunking** — long text splits into sentence-aware chunks when fingerprints approach saturation
-- **Delete & update** — `deleteMemory()` physically heals HNSW edges via a reverse edge index, removes from all indexes, and returns slots to a freelist. `updateMemory()` preserves the parent ID while replacing content.
-- **Checkpoint / fast restart** — `checkpoint()` persists indexes to disk; restarts only replay WAL after the checkpoint
-- **Single binary, no dependencies** — memory-mapped files, no external services
-
 ---
 
 ## How it works
@@ -399,10 +394,4 @@ LongMemEval-S: R@1 = 78.2%, R@5 = 94.6%. Conversational memory retrieval.
 
 ---
 
-## Design
 
-Dependency flow: `Use Cases ← Domain ← Infrastructure`. Domain services call into `infrastructure/` directly. Not Clean Architecture — simplicity and performance over strict layers.
-
-**Delete / Update:** `deleteMemory()` removes from LSH, lexical, and HNSW. An in-memory reverse edge index heals HNSW neighbor lists so no orphaned edges remain. The slot goes to a freelist for reuse. `updateMemory()` deletes old chunks and inserts new ones, preserving the parent ID. Both are WAL-logged; restarts replay the log and rebuild all in-memory indexes. `checkpoint()` persists indexes to skip WAL replay on startup.
-
-**Chunking:** Long documents are split into sentence-aware chunks with one-sentence overlap. Each chunk gets its own fingerprint. Prevents saturation and keeps fingerprints sparse. Short documents stay single-chunk.
