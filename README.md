@@ -13,42 +13,37 @@ A Nim vector search engine that turns text into **10240-bit sparse fingerprints*
 
 ### Insert
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant SVC as memory/insert
-    participant WAL as mmapped_storage
-    participant CORP as corpus_index
-    participant CHK as chunker
-    participant ENC as sdr_encoder
-    participant LSH as fingerprint_lsh
-    participant LEX as lexical_index
-    participant HNSW as hnsw_graph
-
-    User->>SVC: insert(content)
-    SVC->>WAL: allocSlot() → parentId
-    SVC->>WAL: appendWal(parentId, timestamp, content)
-    SVC->>SVC: textCache[parentId] = content
-    SVC->>CORP: addMemory(content)
-    SVC->>CHK: splitIntoChunks(content, cfg) → chunks
-    alt unchunked (1 chunk)
-        SVC->>SVC: chunkId = parentId
-        SVC->>ENC: encodeSdr(content) → fp
-        SVC->>WAL: writeFingerprintUnsafe(chunkId, fp)
-        SVC->>LSH: insertLsh(lsh, fp, chunkId)
-        SVC->>LEX: addMemory(lexical, chunkId, content)
-        SVC->>HNSW: insertHnsw(..., chunkId, fp, ...)
-    else chunked (>1)
-        loop each chunkText
-            SVC->>WAL: chunkId = allocSlot()
-            SVC->>ENC: encodeSdr(chunkText) → fp
-            SVC->>WAL: writeFingerprintUnsafe(chunkId, fp)
-            SVC->>LSH: insertLsh(lsh, fp, chunkId)
-            SVC->>LEX: addMemory(lexical, chunkId, chunkText)
-            SVC->>HNSW: insertHnsw(..., chunkId, fp, ...)
-        end
-    end
-    SVC-->>User: parentId
+```
+    ┌─────────┐
+    │  insert │
+    │(content)│
+    └────┬────┘
+         ▼
+    ┌─────────────────┐
+    │ allocSlot()     │──▶ parentId
+    │ appendWal()     │
+    │ textCache[id]   │
+    │ corpus.add()    │
+    └────────┬────────┘
+             ▼
+    ┌─────────────────┐
+    │ splitIntoChunks │
+    └────────┬────────┘
+             │
+      ┌──────┴──────┐
+      │             │
+  1 chunk       >1 chunks
+      │             │
+      ▼             ▼
+┌──────────┐   ┌─────────────────────────┐
+│ parentId │   │ for each chunkText:     │
+│ =chunkId │   │   allocSlot() → chunkId │
+│ encodeSdr│   │   encodeSdr() → fp      │
+│ writeFp  │   │   writeFingerprint()    │
+│ lshInsert│   │   lshInsert()           │
+│ lexAdd   │   │   lexicalAdd()          │
+│ hnswIns  │   │   hnswInsert()          │
+└──────────┘   └─────────────────────────┘
 ```
 
 1. Allocate a dense slot (`parentId`).
@@ -59,27 +54,41 @@ sequenceDiagram
 
 ### Search
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant SVC as memory/search
-    participant ENC as sdr_encoder
-    participant LSH as fingerprint_lsh
-    participant HNSW as hnsw_graph
-    participant LEX as lexical_index
-    participant RRF as rrf_merger
-    participant RER as reranker
-
-    User->>SVC: search(query, k)
-    SVC->>ENC: encodeSdr(query, isQuery=true) → qfp
-    SVC->>LSH: queryLsh(lsh, qfp) → seedIds
-    SVC->>HNSW: searchHnsw(seeds, entryPt, qfp, k) → semanticResults
-    SVC->>LEX: searchLexical(lexical, query, k) → lexicalResults
-    SVC->>RRF: mergeRrf(semantic, lexical, k) → mergedChunks
-    SVC->>SVC: map chunks→parents, dedupe, keep best score
-    SVC->>SVC: sort desc, trim to k
-    SVC->>RER: rerank(query, candidates, textCache, cfg)
-    SVC-->>User: seq[Memory]
+```
+    ┌─────────┐
+    │ search  │
+    │(query,k)│
+    └────┬────┘
+         ▼
+    ┌─────────────────┐
+    │ encodeSdr()     │──▶ qfp
+    │ (isQuery=true)  │
+    └────────┬────────┘
+             ▼
+    ┌─────────────────┐     ┌─────────────────┐
+    │ queryLsh()      │────▶│ searchHnsw()    │
+    │  (seedIds)      │     │ (semanticResults)│
+    └─────────────────┘     └─────────────────┘
+                                    │
+    ┌─────────────────┐             │
+    │ searchLexical() │─────────────┤
+    │ (lexicalResults)│             ▼
+    └─────────────────┘     ┌─────────────────┐
+                            │ mergeRrf()      │
+                            │ (mergedChunks)  │
+                            └────────┬────────┘
+                                     ▼
+                            ┌─────────────────┐
+                            │ chunks→parents  │
+                            │ dedupe + scores │
+                            └────────┬────────┘
+                                     ▼
+                            ┌─────────────────┐
+                            │ sort desc, trim │
+                            │ rerank()        │
+                            └────────┬────────┘
+                                     ▼
+                              seq[Memory]
 ```
 
 1. Encode query into a dense-query fingerprint.
@@ -92,22 +101,30 @@ sequenceDiagram
 
 ### Update
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant SVC as memory/update
-    participant DEL as memory/delete
-    participant INS as memory/insert
-
-    User->>SVC: updateMemory(id, content)
-    alt id not in textCache
-        SVC-->>User: no-op
-    else
-        SVC->>DEL: deleteMemory(service, id)
-        Note over DEL: heal HNSW, free slots, clear indexes
-        SVC->>INS: re-insert new content reusing same parentId
-        Note over INS: WAL append, chunk, encode, index
-    end
+```
+    ┌─────────────┐
+    │ updateMemory│
+    │(id, content)│
+    └──────┬──────┘
+           │
+      ┌────┴────┐
+      │ known?  │
+      └────┬────┘
+       no / \ yes
+          /   \
+         ▼     ▼
+      (no-op)  ┌─────────────────┐
+               │ deleteMemory()  │
+               │ heal HNSW edges │
+               │ free slots      │
+               └────────┬────────┘
+                        ▼
+               ┌─────────────────┐
+               │ re-insert with  │
+               │ same parentId   │
+               │ WAL + chunk +   │
+               │ encode + index  │
+               └─────────────────┘
 ```
 
 1. Guard: no-op if `id` is unknown.
@@ -116,32 +133,38 @@ sequenceDiagram
 
 ### Delete
 
-```mermaid
-sequenceDiagram
-    actor User
-    participant SVC as memory/delete
-    participant HNSW as hnsw_graph
-    participant LSH as fingerprint_lsh
-    participant LEX as lexical_index
-    participant WAL as mmapped_storage
-
-    User->>SVC: deleteMemory(id)
-    alt id not in textCache
-        SVC-->>User: no-op
-    else
-        loop each chunkId
-            SVC->>HNSW: heal forward edges
-            Note over HNSW: for neighbor N of chunkId,<br/>remove chunkId from reverseIndex[N]
-            SVC->>HNSW: heal backward edges
-            Note over HNSW: for M pointing to chunkId,<br/>remove chunkId from M's neighbor list
-            SVC->>LSH: removeLsh(lsh, fpPtr, chunkId)
-            SVC->>LEX: removeMemory(lexical, chunkId, text)
-            SVC->>WAL: freeSlot(chunkId)
-            SVC->>SVC: del chunkToParent[chunkId]
-        end
-        SVC->>SVC: del textCache[id], timestampCache[id]
-        SVC->>WAL: syncHeader()
-    end
+```
+    ┌─────────────┐
+    │ deleteMemory│
+    │   (id)      │
+    └──────┬──────┘
+           │
+      ┌────┴────┐
+      │ known?  │
+      └────┬────┘
+       no / \ yes
+          /   \
+         ▼     ▼
+      (no-op)  │ collect chunkIds
+               │ for parent
+               ▼
+        ┌──────────────┐
+        │ for each     │
+        │ chunkId:     │
+        │ ├─ heal fwd  │
+        │ │  edges     │
+        │ ├─ heal bwd  │
+        │ │  edges     │
+        │ ├─ removeLsh │
+        │ ├─ removeLex │
+        │ ├─ freeSlot  │
+        │ └─ del map   │
+        └──────┬───────┘
+               ▼
+        ┌──────────────┐
+        │ del caches   │
+        │ syncHeader() │
+        └──────────────┘
 ```
 
 1. Guard: no-op if `id` is unknown.
