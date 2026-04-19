@@ -167,9 +167,9 @@ LongMemEval-S tests long-term conversational memory retrieval. Each of the 500 q
 
 | Metric | Value |
 |--------|-------|
-| R@1 | 78.40% |
-| R@5 | 94.40% |
-| R@10 | 96.60% |
+| R@1 | 78.00% |
+| R@5 | 94.60% |
+| R@10 | 96.80% |
 
 ### Per-Category R@5
 
@@ -177,15 +177,15 @@ LongMemEval-S tests long-term conversational memory retrieval. Each of the 500 q
 |----------|-----|-------|
 | knowledge-update | 100.00% | 78/78 |
 | single-session-user | 98.57% | 69/70 |
-| multi-session | 96.24% | 128/133 |
-| temporal-reasoning | 94.74% | 126/133 |
-| single-session-assistant | 92.86% | 52/56 |
+| multi-session | 96.99% | 129/133 |
+| temporal-reasoning | 95.49% | 127/133 |
+| single-session-assistant | 91.07% | 51/56 |
 | single-session-preference | 63.33% | 19/30 |
 
 ### Observations
 
-- **R@5 of 94.4%** is excellent for a pure sparse retrieval system. The correct session is in the top 5 for 94 out of 100 questions.
-- **R@1 of 78.4%** means Adaline finds the exact right session first ~78% of the time without any LLM re-ranking.
+- **R@5 of 94.6%** is excellent for a pure sparse retrieval system. The correct session is in the top 5 for 95 out of 100 questions.
+- **R@1 of 78.0%** means Adaline finds the exact right session first ~78% of the time without any LLM re-ranking.
 - **Knowledge updates are perfect** (100% R@5). These are the easiest categories — the answer is directly stated in one session.
 - **Multi-session reasoning at 96.2%** is surprisingly strong. Adaline's partitioned SDR (tokens + bigrams + XOR context) captures enough semantic signal to retrieve sessions that contain distributed facts.
 - **Temporal reasoning at 94.7%** is also strong. Even though Adaline has no explicit date parsing, the lexical index picks up temporal references and the semantic fingerprint captures event sequences.
