@@ -11,6 +11,20 @@ A Nim vector search engine that turns text into **10240-bit sparse fingerprints*
 
 ## How it works
 
+Adaline uses a **dual-lane retrieval architecture**: every document is indexed simultaneously into a **semantic lane** (sparse fingerprint + HNSW graph + LSH seeds) and a **lexical lane** (inverted index with QLM scoring). At query time both lanes run in parallel; their results are fused with Reciprocal Rank Fusion and reranked by term coverage.
+
+### Flow overview
+
+**Insert** is the only write path. Content enters through the WAL for durability, is conditionally split into sentence-aware chunks, and each chunk is fingerprinted and added to all three indexes (LSH, HNSW, lexical). Short content skips chunking and the parent ID serves as its own chunk ID.
+
+**Search** runs two independent retrievals: LSH seeds jump-start an HNSW graph descent for semantic neighbors, while the lexical lane scores documents with Query Likelihood + Dirichlet smoothing. RRF merges the two ranked lists, chunk IDs are resolved back to parent memories (deduplicated), and a term-coverage reranker boosts exact matches.
+
+**Update** is an atomic delete-then-insert that preserves the parent ID. Old chunks are physically removed from all indexes (with HNSW edge healing via the reverse edge index), new chunks are inserted, and the WAL logs the replacement.
+
+**Delete** physically removes every chunk of a parent from all indexes. The reverse edge index makes HNSW healing possible without rebuilding the graph. Freed slots go to a freelist for reuse.
+
+---
+
 ### Insert
 
 Takes a text string, writes it to the WAL, and indexes it across three lanes:
