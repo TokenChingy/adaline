@@ -8,10 +8,10 @@ type
     layerCount*: uint8
     entryLayer*: uint8
     reserved*: array[6, uint8]
-    neighbors*: array[HnswNeighborSlots, uint64]
+    neighbors*: array[HnswNeighborSlots, uint32]
 
 static:
-  doAssert sizeof(HnswNode) == 2056
+  doAssert sizeof(HnswNode) == 1032
 
 iterator neighbors*(node: ptr HnswNode; layer: int): uint64 =
   let start = layer * HnswMaxNeighbors
@@ -19,13 +19,13 @@ iterator neighbors*(node: ptr HnswNode; layer: int): uint64 =
     let nid = node.neighbors[start + i]
     if nid == 0:
       break
-    yield nid
+    yield uint64(nid)
 
 proc setNeighbors*(node: ptr HnswNode; layer: int; nids: seq[uint64]) =
   let start = layer * HnswMaxNeighbors
   for i in 0 ..< HnswMaxNeighbors:
     if i < nids.len:
-      node.neighbors[start + i] = nids[i]
+      node.neighbors[start + i] = uint32(nids[i])
     else:
       node.neighbors[start + i] = 0
 
@@ -34,7 +34,7 @@ proc removeNeighbor*(node: ptr HnswNode; layer: int; targetId: uint64): bool =
   ## Shifts remaining neighbors left. Returns true if found.
   let start = layer * HnswMaxNeighbors
   for i in 0 ..< HnswMaxNeighbors:
-    if node.neighbors[start + i] == targetId:
+    if uint64(node.neighbors[start + i]) == targetId:
       for j in (start + i) ..< (start + HnswMaxNeighbors - 1):
         node.neighbors[j] = node.neighbors[j + 1]
       node.neighbors[start + HnswMaxNeighbors - 1] = 0

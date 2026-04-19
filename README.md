@@ -10,7 +10,7 @@ Adaline uses a **dual-lane retrieval architecture**: every document is indexed s
 
 ### Flow overview
 
-All storage is slot-addressed memory-mapped flat files with 256-byte self-describing headers (`ADLN` magic). Fingerprint slots are 1280 bytes; graph nodes are 2056 bytes. Files grow in 64 MiB pre-allocated chunks to minimize `mmap` remaps. IDs are dense integers starting at 0; deleted slots are pushed onto a freelist implemented as a linked list in the first 8 bytes of each freed fingerprint slot.
+All storage is slot-addressed memory-mapped flat files with 256-byte self-describing headers (`ADLN` magic). Fingerprint slots are 1280 bytes; graph nodes are 1032 bytes. Files grow in 64 MiB pre-allocated chunks to minimize `mmap` remaps. IDs are dense integers starting at 0; deleted slots are pushed onto a freelist implemented as a linked list in the first 8 bytes of each freed fingerprint slot.
 
 **Insert.** `allocId()` hands out a slot from the freelist or appends a new one. The WAL record is `(memoryId: uint64, timestamp: uint64, textLen: uint32, text)` — append-only, flushed immediately. The text is then conditionally chunked: the chunker estimates saturation for each of the three fingerprint blocks (token, character-bigram, XOR-context) against `chunkSaturationThreshold` (default 0.6). If any block would exceed 60 % saturation, the text is split on sentence boundaries (`., !, ?`) with one-sentence overlap between chunks.
 
@@ -332,7 +332,7 @@ references remain. Freed IDs go to a freelist for reuse.
 |------|---------|
 | `wal.bin` | Append-only text + metadata |
 | `fingerprints.bin` | Fingerprint store (header + 1280-byte slots) |
-| `graph.bin` | HNSW node store (header + 2056-byte slots) |
+| `graph.bin` | HNSW node store (header + 1032-byte slots) |
 | `chunks.bin` | Parent→chunk mappings |
 | `lsh.bin` | Persisted LSH index (checkpoint) |
 | `lexical.bin` | Persisted lexical postings (checkpoint) |

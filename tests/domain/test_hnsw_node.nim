@@ -3,7 +3,7 @@ import ../../domain/entities/hnsw_node
 
 suite "HNSW node":
   test "sizeof HnswNode is 2056 bytes":
-    check sizeof(HnswNode) == 2056
+    check sizeof(HnswNode) == 1032
 
   test "clearNode zeros all fields":
     var node = HnswNode()
