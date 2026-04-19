@@ -1,6 +1,6 @@
 # Adaline
 
-A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped flat files, MinHash Local Sensitivity Hash, Hierarchal Navigable Small World Graph Search, and a Lexical Sidecar with Reciprocal Rank Fusion, and Term Coverage Rerank.
+A Nim engine for Sparse Distributed Representations (SDR) using memory-mapped flat files, GoldFinger-style Locality-Sensitive Hashing, Hierarchal Navigable Small World Graph Search, and a Lexical Sidecar with Reciprocal Rank Fusion, and Term Coverage Rerank.
 
 ## What Adaline Does
 
@@ -26,7 +26,7 @@ It combines both approaches to give you the best of each world.
 │                            │                                                    │
 │                            └──► Each Chunk:                                     │
 │                                   Tokenize ──► SDR Encoder ──► Fingerprint      │
-│                                        ├──► MinHash LSH Index                   │
+│                                        ├──► Fingerprint LSH Index                │
 │                                        ├──► HNSW Graph                          │
 │                                        ├──► Lexical Index                       │
 │                                        └──► Corpus Index (IDF)                  │
@@ -43,7 +43,7 @@ It combines both approaches to give you the best of each world.
 │  Query ──► Same SDR Encoder ──► Fingerprint                                     │
 │       │                                                                         │
 │       ├──► SEMANTIC LANE ──────────────────────────────────────────────┐        │
-│       │    MinHash LSH  ──►  Seed Candidates                           │        │
+│       │    Fingerprint LSH  ──►  Seed Candidates                         │        │
 │       │         │          │                                           │        │
 │       │         └─────────►└──► HNSW Graph Search (Layer-0 descent)    │        │
 │       │                            │                                   │        │
@@ -154,11 +154,11 @@ The 1280-byte fingerprint is written to `fingerprints.bin` at offset `chunkId` v
 
 ---
 
-### Step 6: MinHash LSH Insert
+### Step 6: Fingerprint LSH Insert
 
-Now we need a fast way to find "fingerprints that probably overlap with this one." We use **MinHash LSH** (Locality Sensitive Hashing).
+Now we need a fast way to find "fingerprints that probably overlap with this one." We use **direct fingerprint banding** (GoldFinger-style LSH).
 
-**How MinHash works:**
+**How it works:**
 1. Take the 10240-bit fingerprint and imagine 100 different hash functions looking at it.
 2. For each hash function, find the first `1` bit it encounters. This gives 100 numbers.
 3. Group those 100 numbers into 25 **bands** of 4 **rows** each.
@@ -231,8 +231,8 @@ The query text goes through the **exact same SDR encoder** as memories. It produ
 
 We need to find chunks whose fingerprints are similar to the query fingerprint. We do this in two phases:
 
-#### Phase A: MinHash LSH Query
-1. Compute the query's 100 MinHash values (same as during insert).
+#### Phase A: Fingerprint LSH Query
+1. Compute the query's LSH band hashes directly from its fingerprint segments (same as during insert).
 2. Band and hash them into 25 buckets.
 3. Collect all `chunkId`s stored in any matching bucket.
 4. Deduplicate.
@@ -347,7 +347,7 @@ Key parameters in `domain/entities/config.nim`:
 | `tokenWeight` | 0.50 | Jaccard weight for token block |
 | `bigramWeight` | 0.25 | Jaccard weight for char-bigram block |
 | `contextWeight` | 0.25 | Jaccard weight for XOR-context block |
-| `lshBands` / `lshRows` | 25 / 4 | MinHash LSH banding |
+| `lshBands` / `lshRows` | 50 / 2 | Fingerprint LSH banding |
 | `hnswMaxLayers` | 8 | HNSW layer count |
 | `hnswMaxNeighbors` | 32 | Max edges per layer |
 | `hnswEfConstruction` | 200 | HNSW build beam width |

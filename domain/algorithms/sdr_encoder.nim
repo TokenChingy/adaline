@@ -3,38 +3,31 @@ import ../entities/config
 import corpus_index
 import std/strutils
 
-const
-  GoldenRatio64* = 0x9e3779b97f4a7c15'u64
-
-type SplitMix64* = uint64
-
-proc next*(sm: var SplitMix64): uint64 =
-  var z = sm + 0x9e3779b97f4a7c15'u64
-  sm = z
-  z = (z xor (z shr 30)) * 0xbf58476d1ce4e5b9'u64
-  z = (z xor (z shr 27)) * 0x94d049bb133111eb'u64
-  return z xor (z shr 31)
-
-proc fnv1a64(s: string): uint64 =
-  result = 0xcbf29ce484222325'u64
-  for c in s:
-    result = result xor uint64(c)
-    result = result * 0x100000001b3'u64
-
-proc hashFeature*(feature: string): uint64 =
-  var sm = SplitMix64(fnv1a64(feature) + GoldenRatio64)
-  result = next(sm)
+# --- Deterministic locality-preserving hash ---
+# Each feature maps deterministically to bit positions.
+# Multiple probes use different seeds so a single feature can set >1 bit.
+proc hashFeature*(feature: string; seed: uint64 = 0): uint64 =
+  var h = seed
+  for c in feature:
+    h += uint64(c)
+    h += h shl 10
+    h = h xor (h shr 6)
+  h += h shl 3
+  h = h xor (h shr 11)
+  h += h shl 15
+  result = h
 
 proc probeBlock*(fp: var Fingerprint; feature: string; count, baseBit, sizeBits: int) =
-  let h = hashFeature(feature)
   for i in 0 ..< count:
-    var sm = SplitMix64(h + uint64(i) * GoldenRatio64)
-    let pos = int(next(sm) mod uint64(sizeBits)) + baseBit
+    let h = hashFeature(feature, uint64(i))
+    let pos = int(h mod uint64(sizeBits)) + baseBit
     setBit(fp, pos)
 
-proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusIndex()): Fingerprint =
+proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusIndex(); isQuery: bool = false): Fingerprint =
   result = initFingerprint()
   let normalised = text.toLowerAscii()
+
+  let probeMult = if isQuery: cfg.queryProbeMultiplier else: 1.0
 
   # --- Block A: Tokens ---
   var tokens: seq[string] = @[]
@@ -43,13 +36,23 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
       tokens.add(token)
 
   for token in tokens:
-    let n = scaledProbes(index, token, cfg.tokenProbes)
+    let baseN = scaledProbes(index, token, cfg.tokenProbes)
+    let n = max(1, int(float(baseN) * probeMult))
     probeBlock(result, token, n, 0, cfg.tokenBits)
+    # Prefix/suffix features for morphological robustness
+    if token.len >= 4:
+      let prefix = token[0..3]
+      let suffix = token[^4..^1]
+      let np = max(1, int(float(scaledProbes(index, prefix, cfg.tokenProbes)) * probeMult * 0.5))
+      let ns = max(1, int(float(scaledProbes(index, suffix, cfg.tokenProbes)) * probeMult * 0.5))
+      probeBlock(result, prefix, np, 0, cfg.tokenBits)
+      probeBlock(result, suffix, ns, 0, cfg.tokenBits)
 
   # --- Token bigrams in token block ---
   for i in 0 ..< tokens.len - 1:
     let bigram = tokens[i] & "_" & tokens[i + 1]
-    let n = scaledProbes(index, bigram, cfg.tokenBigramProbes)
+    let baseN = scaledProbes(index, bigram, cfg.tokenBigramProbes)
+    let n = max(1, int(float(baseN) * probeMult))
     probeBlock(result, bigram, n, 0, cfg.tokenBits)
 
   # --- Block B: Character bigrams ---
@@ -57,27 +60,30 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
     for i in 0 ..< normalised.len - 1:
       let bg = normalised[i ..< i + 2]
       if bg[0] in Letters + Digits and bg[1] in Letters + Digits:
-        let n = scaledProbes(index, bg, cfg.bigramProbes)
+        let baseN = scaledProbes(index, bg, cfg.bigramProbes)
+        let n = max(1, int(float(baseN) * probeMult))
         probeBlock(result, bg, n, cfg.tokenBits, cfg.bigramBits)
 
   # --- Block C: XOR Bounded Neighbors ---
   if tokens.len >= 2:
     var tokenHashes = newSeq[uint64](tokens.len)
     for i in 0 ..< tokens.len:
-      tokenHashes[i] = hashFeature(tokens[i])
+      tokenHashes[i] = hashFeature(tokens[i], 0)
 
     for i in 0 ..< tokens.len:
       if i > 0:
         let xorVal = tokenHashes[i] xor tokenHashes[i - 1]
-        let n = scaledProbes(index, "L_" & tokens[i - 1], cfg.contextProbes)
+        let baseN = scaledProbes(index, "L_" & tokens[i - 1], cfg.contextProbes)
+        let n = max(1, int(float(baseN) * probeMult))
         for k in 0 ..< n:
-          var sm = SplitMix64(xorVal + uint64(k) * GoldenRatio64)
-          let pos = int(next(sm) mod uint64(cfg.contextBits)) + cfg.tokenBits + cfg.bigramBits
+          let h = xorVal + uint64(k) * 0x9e3779b97f4a7c15'u64
+          let pos = int(h mod uint64(cfg.contextBits)) + cfg.tokenBits + cfg.bigramBits
           setBit(result, pos)
       if i < tokens.len - 1:
         let xorVal = tokenHashes[i] xor tokenHashes[i + 1]
-        let n = scaledProbes(index, "R_" & tokens[i + 1], cfg.contextProbes)
+        let baseN = scaledProbes(index, "R_" & tokens[i + 1], cfg.contextProbes)
+        let n = max(1, int(float(baseN) * probeMult))
         for k in 0 ..< n:
-          var sm = SplitMix64(xorVal + uint64(k) * GoldenRatio64)
-          let pos = int(next(sm) mod uint64(cfg.contextBits)) + cfg.tokenBits + cfg.bigramBits
+          let h = xorVal + uint64(k) * 0x9e3779b97f4a7c15'u64
+          let pos = int(h mod uint64(cfg.contextBits)) + cfg.tokenBits + cfg.bigramBits
           setBit(result, pos)

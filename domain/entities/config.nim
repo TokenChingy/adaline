@@ -20,7 +20,7 @@ type
     bigramProbes*: int
     contextProbes*: int
 
-    # MinHash LSH parameters
+    # Fingerprint LSH parameters (GoldFinger-style direct banding)
     minHashFunctions*: int
     lshBands*: int
     lshRows*: int
@@ -37,11 +37,21 @@ type
     # RRF constant
     rrfK*: int
 
+    # RRF lane weights
+    semanticRrfWeight*: float
+    lexicalRrfWeight*: float
+
     # Reranker
     rerankCoverageWeight*: float
 
     # Chunking threshold (0.0–1.0); chunk when any block exceeds this saturation
     chunkSaturationThreshold*: float
+
+    # Similarity metric for fingerprint comparison
+    similarityMetric*: string
+
+    # Multiplier for query probes (makes query fingerprints denser)
+    queryProbeMultiplier*: float
 
 proc defaultEngineConfig*(): EngineConfig =
   result = EngineConfig(
@@ -58,14 +68,18 @@ proc defaultEngineConfig*(): EngineConfig =
     bigramProbes: 2,
     contextProbes: 2,
     minHashFunctions: 100,
-    lshBands: 25,
-    lshRows: 4,
+    lshBands: 50,
+    lshRows: 2,
     hnswMaxLayers: 8,
     hnswMaxNeighbors: 32,
     hnswEfConstruction: 200,
     hnswEfSearch: 64,
     dirichletMu: 2000.0,
     rrfK: 60,
+    semanticRrfWeight: 0.5,
+    lexicalRrfWeight: 1.0,
     rerankCoverageWeight: 0.5,
-    chunkSaturationThreshold: 0.6
+    chunkSaturationThreshold: 0.6,
+    similarityMetric: "overlap",
+    queryProbeMultiplier: 2.0,
   )

@@ -24,7 +24,7 @@ task test, "Compile and run all tests":
     "tests/domain/test_corpus_index.nim",
     "tests/domain/test_hnsw_node.nim",
     "tests/domain/test_lexical_index.nim",
-    "tests/domain/test_minhash_lsh.nim",
+    "tests/domain/test_fingerprint_lsh.nim",
     "tests/domain/test_reranker.nim",
     "tests/domain/test_rrf_merger.nim",
     "tests/domain/test_weighted_jaccard.nim",

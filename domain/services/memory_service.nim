@@ -3,8 +3,9 @@ import ../entities/config
 import ../entities/hnsw_node
 import ../algorithms/sdr_encoder
 import ../algorithms/corpus_index
-import ../algorithms/minhash_lsh
+import ../algorithms/fingerprint_lsh
 import ../algorithms/hnsw_graph
+import ../algorithms/weighted_jaccard
 import ../algorithms/lexical_index
 import ../algorithms/rrf_merger
 import ../algorithms/reranker
@@ -16,7 +17,7 @@ type
   MemoryService* = object
     storage*: MmappedStorage
     cfg*: EngineConfig
-    lsh*: MinHashLshIndex
+    lsh*: FingerprintLshIndex
     lexical*: LexicalIndex
     corpus*: CorpusIndex
     maxHnswLayer*: int
@@ -82,8 +83,7 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
 
       # Rebuild LSH from stored fingerprint
       let fpPtr = result.storage.getFingerprintPtr(chunkId)
-      let sig = computeSignature(fpPtr, cfg)
-      insertLsh(result.lsh, sig, chunkId)
+      insertLsh(result.lsh, fpPtr, chunkId)
 
       # Find HNSW entry point from stored graph
       let node = result.storage.getHnswNodePtr(chunkId)
@@ -123,8 +123,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
     var fp = encodeSdr(content, service.cfg, service.corpus)
     service.storage.writeFingerprint(chunkId, fp)
 
-    let sig = computeSignature(addr fp, service.cfg)
-    insertLsh(service.lsh, sig, chunkId)
+    insertLsh(service.lsh, addr fp, chunkId)
 
     addMemory(service.lexical, chunkId, content)
 
@@ -142,8 +141,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
       var fp = encodeSdr(chunkText, service.cfg, service.corpus)
       service.storage.writeFingerprint(chunkId, fp)
 
-      let sig = computeSignature(addr fp, service.cfg)
-      insertLsh(service.lsh, sig, chunkId)
+      insertLsh(service.lsh, addr fp, chunkId)
 
       addMemory(service.lexical, chunkId, chunkText)
 
@@ -154,12 +152,10 @@ proc insert*(service: var MemoryService; content: string): uint64 =
   result = parentId
 
 proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
-  let qfp = encodeSdr(query, service.cfg, service.corpus)
-  let qsig = computeSignature(addr qfp, service.cfg)
-
-  # LSH + HNSW semantic search at chunk level
-  let lshSeeds = queryLsh(service.lsh, qsig)
+  let qfp = encodeSdr(query, service.cfg, service.corpus, isQuery = true)
+  # Semantic lane: LSH seeds + HNSW approximate search
   var semanticResults = newSeq[tuple[memoryId: uint64, score: float]]()
+  let lshSeeds = queryLsh(service.lsh, addr qfp)
   if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
     semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
                                  lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
@@ -168,7 +164,8 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   var lexicalResults = searchLexical(service.lexical, query, k)
 
   # RRF merge at chunk level
-  let merged = mergeRrf(semanticResults, lexicalResults, k, service.cfg.rrfK)
+  let merged = mergeRrf(semanticResults, lexicalResults, k, service.cfg.rrfK,
+                        service.cfg.semanticRrfWeight, service.cfg.lexicalRrfWeight)
 
   # Map chunks to parents and deduplicate, keeping best score per parent
   var parentScores = initTable[uint64, float]()

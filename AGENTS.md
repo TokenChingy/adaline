@@ -2,7 +2,7 @@
 
 ## What this project is
 
-Adaline is a Nim library for generating and querying **Sparse Distributed Representations** via **Sparse Fingerprints**. Each fingerprint is a fixed-size **10240-bit bitmap**. These fingerprints are stored and searched inside a **Hierarchical Navigable Small World (HNSW) Graph** with a **MinHash LSH** seed layer. A **Lexical Sidecar** (Query Likelihood with Dirichlet Smoothing) runs in parallel, and results are merged via **Reciprocal Rank Fusion**.
+Adaline is a Nim library for generating and querying **Sparse Distributed Representations** via **Sparse Fingerprints**. Each fingerprint is a fixed-size **10240-bit bitmap**. These fingerprints are stored and searched inside a **Hierarchical Navigable Small World (HNSW) Graph** with a **Fingerprint LSH** (GoldFinger-style) seed layer. A **Lexical Sidecar** (Query Likelihood with Dirichlet Smoothing) runs in parallel, and results are merged via **Reciprocal Rank Fusion**.
 
 Long memories are automatically **chunked** into multiple fingerprints when any block approaches saturation. Chunk-to-parent linkage is persisted in `chunks.bin`.
 
@@ -18,7 +18,7 @@ domain/entities/    <- Core types: Fingerprint, HNSW node, Memory, Config, Chunk
 domain/algorithms/  <- The math:
                        - SDR encoder (partitioned Tokens / Bigrams / XOR Context)
                        - Regional weighted Jaccard
-                       - Banded MinHash LSH
+                       - Banded Fingerprint LSH (GoldFinger-style)
                        - HNSW construction and greedy search
                        - Lexical index (QLM + Dirichlet smoothing)
                        - Corpus index (IDF tracking)
@@ -49,7 +49,7 @@ Use Cases ← Domain ← Infrastructure
 - **Language:** Nim
 - **Fingerprint size:** 10240 bits (1280 bytes)
 - **Storage:** Memory-mapped flat files (WAL, fingerprint store, graph store, chunks mapping store)
-- **Index / search structure:** Banded MinHash LSH + HNSW Graph
+- **Index / search structure:** Banded Fingerprint LSH + HNSW Graph
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
 - **Merger:** Reciprocal Rank Fusion (RRF)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`

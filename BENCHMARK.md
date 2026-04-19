@@ -55,44 +55,44 @@ python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 2.99 s |
-| Throughput | 1,732 docs/s |
-| P50 latency | 0.56 ms |
-| P95 latency | 1.12 ms |
-| P99 latency | 1.79 ms |
+| Total time | 1.94 s |
+| Throughput | 2,673 docs/s |
+| P50 latency | 0.37 ms |
+| P95 latency | 0.65 ms |
+| P99 latency | 0.89 ms |
 
 ### Query Speed (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 4.60 s |
-| Throughput | 241 queries/s |
-| P50 latency | 4.19 ms |
-| P95 latency | 5.16 ms |
-| P99 latency | 5.65 ms |
+| Total time | 4.81 s |
+| Throughput | 231 queries/s |
+| P50 latency | 4.38 ms |
+| P95 latency | 5.48 ms |
+| P99 latency | 6.01 ms |
 
 ### Retrieval Quality (over 300 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 40.58% |
-| Recall@5 | 61.08% |
-| Recall@10 | 68.83% |
-| Recall@100 | 86.71% |
-| Precision@1 | 42.00% |
+| Recall@1 | 43.25% |
+| Recall@5 | 61.47% |
+| Recall@10 | 68.06% |
+| Recall@100 | 88.04% |
+| Precision@1 | 44.67% |
 | Precision@5 | 13.13% |
-| Precision@10 | 7.57% |
-| Precision@100 | 1.06% |
-| MRR | 0.5182 |
-| MAP | 0.5071 |
-| nDCG@10 | 0.5480 |
+| Precision@10 | 7.47% |
+| Precision@100 | 1.13% |
+| MRR | 0.5361 |
+| MAP | 0.5242 |
+| nDCG@10 | 0.5591 |
 
 ### Observations
 
-- **The M2 is ~2.8× faster at indexing** than the Intel i7-8559U (1,732 vs 608 docs/s), thanks to fast unified memory and efficient ARM64 codegen.
+- **The M2 is ~4.4× faster at indexing** than the Intel i7-8559U (2,673 vs 608 docs/s), thanks to deterministic hashing (no MinHash overhead) and efficient ARM64 codegen.
 - **Query latency is excellent** for a pure-Nim, memory-mapped engine. P50 ~4.2ms for top-100 semantic+lexical fusion is competitive with much heavier systems.
-- **Recall@1 of 40.6%** means the system finds the top relevant document first ~41% of the time. Solid for a sparse fingerprint approach without neural re-ranking.
-- **nDCG@10 of 0.55** shows good ranking quality in the top 10. The term-coverage reranker contributes significantly — without it, nDCG@10 was ~0.36 in earlier experiments.
+- **Recall@1 of 43.3%** means the system finds the top relevant document first ~43% of the time. Solid for a sparse fingerprint approach without neural re-ranking.
+- **nDCG@10 of 0.56** shows good ranking quality in the top 10. The term-coverage reranker contributes significantly — without it, nDCG@10 was ~0.36 in earlier experiments.
 - **The bottleneck is not search** — 241 q/s means a single core can handle production query loads for small-to-medium corpora.
 - **Memory footprint is tiny**: ~6.5 MB for fingerprints (5K × 1280 bytes) plus a few MB for in-memory indexes.
 - **Chunking overhead**: SciFact documents are short, so most do not trigger chunking.
@@ -221,10 +221,10 @@ To run:
 
 ## Methodology Notes
 
-- **Distance metric**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
-- **Search path**: LSH seeds → HNSW layer-0 descent (efSearch=64).
+- **Distance metric**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context). Default similarity metric is **Overlap coefficient**.
+- **Search path**: Fingerprint LSH seeds → HNSW layer-0 descent (efSearch=64).
 - **Lexical scoring**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
-- **Fusion**: Reciprocal Rank Fusion (k=60).
+- **Fusion**: Weighted Reciprocal Rank Fusion (k=60, semanticWeight=0.5, lexicalWeight=1.0).
 - **Reranking**: Term-coverage boost (weight=0.5) applied to top-K merged results.
 - **Metrics**: Computed against BEIR qrels (binary relevance), averaged only over queries that have judgments. nDCG uses standard `1/log2(rank+1)` gain.
 

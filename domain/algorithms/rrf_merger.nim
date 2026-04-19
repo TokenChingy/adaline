@@ -2,15 +2,17 @@ import std/[tables, algorithm]
 
 proc mergeRrf*(semantic: seq[tuple[memoryId: uint64, score: float]];
                lexical: seq[tuple[memoryId: uint64, score: float]];
-               k: int; rrfK: int): seq[tuple[memoryId: uint64, score: float]] =
+               k: int; rrfK: int;
+               semanticWeight: float = 1.0;
+               lexicalWeight: float = 1.0): seq[tuple[memoryId: uint64, score: float]] =
   var scores = initTable[uint64, float]()
 
   for rank, item in semantic:
-    let rrfScore = 1.0 / (float(rrfK) + float(rank + 1))
+    let rrfScore = semanticWeight / (float(rrfK) + float(rank + 1))
     scores[item.memoryId] = scores.getOrDefault(item.memoryId, 0.0) + rrfScore
 
   for rank, item in lexical:
-    let rrfScore = 1.0 / (float(rrfK) + float(rank + 1))
+    let rrfScore = lexicalWeight / (float(rrfK) + float(rank + 1))
     scores[item.memoryId] = scores.getOrDefault(item.memoryId, 0.0) + rrfScore
 
   var ranked = newSeq[tuple[score: float, memoryId: uint64]]()

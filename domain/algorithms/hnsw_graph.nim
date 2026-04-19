@@ -52,10 +52,11 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
         if ndist < -results[0].negDist or results.len < ef:
           candidates.push((ndist, nid))
 
-  result = newSeq[tuple[id: uint64, dist: float]](results.len)
-  for i in 0 ..< results.len:
+  let n = results.len
+  result = newSeq[tuple[id: uint64, dist: float]](n)
+  for i in 0 ..< n:
     let (negDist, id) = results.pop()
-    result[i] = (id, -negDist)
+    result[n - 1 - i] = (id, -negDist)
 
 proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint;
                  cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64) =
@@ -119,7 +120,7 @@ proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint6
                  queryFp: ptr Fingerprint; k: int; cfg: EngineConfig): seq[tuple[memoryId: uint64, score: float]] =
   var allResults = initTable[uint64, float]()
 
-  # --- Lane 1: Score LSH seeds directly (brute-force) ---
+  # --- Lane 1: Score LSH seeds directly ---
   for seed in seeds:
     if not allResults.hasKey(seed):
       let sptr = getFingerprintPtr(fpMem, seed)

@@ -1,20 +1,9 @@
 import std/bitops
+import config
 
 const
   FingerprintBytes* = 1280
   FingerprintSegments* = 160
-
-  # Block A: Tokens — 4096 bits = 64 segments (0..63)
-  TokenSegmentStart* = 0
-  TokenSegmentCount* = 64
-
-  # Block B: Bigrams — 3072 bits = 48 segments (64..111)
-  BigramSegmentStart* = 64
-  BigramSegmentCount* = 48
-
-  # Block C: XOR Context — 3072 bits = 48 segments (112..159)
-  ContextSegmentStart* = 112
-  ContextSegmentCount* = 48
 
 type
   Fingerprint* = object
@@ -39,3 +28,13 @@ proc popcountRegionAnd*(a, b: ptr Fingerprint; segmentStart, segmentCount: int):
 proc popcountRegionOr*(a, b: ptr Fingerprint; segmentStart, segmentCount: int): int =
   for i in segmentStart ..< segmentStart + segmentCount:
     result += popcount(a.bits[i] or b.bits[i])
+
+# Segment boundaries are derived from config so block sizes remain fully configurable.
+proc tokenSegmentStart*(cfg: EngineConfig): int = 0
+proc tokenSegmentCount*(cfg: EngineConfig): int = cfg.tokenBits shr 6
+
+proc bigramSegmentStart*(cfg: EngineConfig): int = tokenSegmentCount(cfg)
+proc bigramSegmentCount*(cfg: EngineConfig): int = cfg.bigramBits shr 6
+
+proc contextSegmentStart*(cfg: EngineConfig): int = bigramSegmentStart(cfg) + bigramSegmentCount(cfg)
+proc contextSegmentCount*(cfg: EngineConfig): int = cfg.contextBits shr 6
