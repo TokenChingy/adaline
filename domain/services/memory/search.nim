@@ -24,8 +24,7 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   var lexicalResults = searchLexical(service.lexical, query, k)
 
   # RRF merge at chunk level
-  let merged = mergeRrf(semanticResults, lexicalResults, k, service.cfg.rrfK,
-                        service.cfg.semanticRrfWeight, service.cfg.lexicalRrfWeight)
+  let merged = mergeRrf(semanticResults, lexicalResults, k, service.cfg.rrfK)
 
   # Map chunks to parents and deduplicate, keeping best score per parent
   var parentScores = initTable[uint64, float]()

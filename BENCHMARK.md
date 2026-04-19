@@ -202,6 +202,6 @@ At 8.8M docs, each query visits roughly `64 × log(N)` ≈ 1,000–2,000 nodes. 
 - **Distance**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
 - **Search**: LSH seeds → HNSW layer-0 descent (efSearch=64).
 - **Lexical**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
-- **Fusion**: Weighted RRF (k=60, semanticWeight=0.5, lexicalWeight=1.0).
+- **Fusion**: RRF (k=60).
 - **Reranking**: Term-coverage boost (weight=0.5) on top-K merged results.
 - **Metrics**: Computed against BEIR qrels (binary relevance), averaged only over queries with judgments. nDCG uses standard `1/log2(rank+1)` gain.

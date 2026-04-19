@@ -37,8 +37,6 @@ type
     rrfK*: int
 
     # RRF lane weights
-    semanticRrfWeight*: float
-    lexicalRrfWeight*: float
 
     # Reranker
     rerankCoverageWeight*: float
@@ -70,9 +68,7 @@ proc defaultEngineConfig*(): EngineConfig =
     hnswEfConstruction: 200,
     hnswEfSearch: 64,
     dirichletMu: 2000.0,
-    rrfK: 60,
-    semanticRrfWeight: 0.5,
-    lexicalRrfWeight: 1.0,
+    rrfK: 10,
     rerankCoverageWeight: 0.5,
     chunkSaturationThreshold: 0.6,
     queryProbeMultiplier: 2.0,
