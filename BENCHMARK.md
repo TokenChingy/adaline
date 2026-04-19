@@ -50,46 +50,44 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 2.21 s |
-| Throughput | 2,350 docs/s |
-| P50 latency | 0.41 ms |
+| Total time | 2.10 s |
+| Throughput | 2,465 docs/s |
+| P50 latency | 0.39 ms |
 | P95 latency | 0.74 ms |
-| P99 latency | 1.03 ms |
+| P99 latency | 1.17 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 4.98 s |
-| Throughput | 223 q/s |
-| P50 latency | 4.50 ms |
-| P95 latency | 5.72 ms |
-| P99 latency | 6.37 ms |
+| Total time | 4.99 s |
+| Throughput | 222 q/s |
+| P50 latency | 4.49 ms |
+| P95 latency | 5.74 ms |
+| P99 latency | 7.03 ms |
 
 ### Retrieval Quality (300 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 42.92% |
-| Recall@5 | 61.58% |
-| Recall@10 | 67.83% |
-| Recall@100 | 88.04% |
-| Precision@1 | 44.33% |
-| Precision@5 | 13.20% |
-| Precision@10 | 7.47% |
-| Precision@100 | 1.14% |
-| MRR | 0.5331 |
-| MAP | 0.5214 |
-| nDCG@10 | 0.5566 |
+| Recall@1 | 43.47% |
+| Recall@5 | 63.28% |
+| Recall@10 | 72.07% |
+| Recall@100 | 86.49% |
+| Precision@1 | 44.67% |
+| Precision@5 | 13.53% |
+| Precision@10 | 7.90% |
+| Precision@100 | 1.05% |
+| MRR | 0.5475 |
+| MAP | 0.5371 |
+| nDCG@10 | 0.5794 |
 
 ### CRUD Throughput (on already-indexed SciFact)
 
 | Operation | Count | Total | Throughput | P50 | P95 |
 |-----------|-------|-------|------------|-----|-----|
-| Delete | 1,000 | 0.86 s | 1,158 docs/s | 0.92 ms | 1.69 ms |
-| Delete | 2,500 | 1.86 s | 1,348 docs/s | 0.74 ms | 1.34 ms |
-| Update | 1,000 | 0.91 s | 1,099 docs/s | 0.89 ms | 1.64 ms |
-| Update | 2,500 | 1.41 s | 1,769 docs/s | 0.51 ms | 0.95 ms |
+| Delete | 1,000 | 0.78 s | 1,282 docs/s | 0.84 ms | 1.52 ms |
+| Update | 1,000 | 0.83 s | 1,200 docs/s | 0.84 ms | 1.44 ms |
 
 Delete/update speed varies with graph density; sparser graphs heal faster.
 
@@ -97,6 +95,7 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 
 - P50 query latency is ~4.5 ms for top-100 semantic+lexical fusion.
 - Term-coverage reranker contributes significantly — without it, nDCG@10 was ~0.36 in earlier experiments.
+- Lowering `rrfK` from 60 to 10 improved SciFact nDCG@10 by ~0.02 (sharper rank discrimination).
 - Memory footprint: ~6.5 MB for fingerprints plus a few MB for in-memory indexes.
 - SciFact documents are short; most do not trigger chunking.
 
@@ -110,37 +109,37 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 1.67 s |
-| Throughput | 2,175 docs/s |
-| P50 latency | 0.46 ms |
-| P95 latency | 0.72 ms |
-| P99 latency | 1.03 ms |
+| Total time | 1.49 s |
+| Throughput | 2,445 docs/s |
+| P50 latency | 0.42 ms |
+| P95 latency | 0.63 ms |
+| P99 latency | 0.90 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Total time | 8.96 s |
-| Throughput | 361 q/s |
-| P50 latency | 2.45 ms |
-| P95 latency | 3.93 ms |
-| P99 latency | 4.34 ms |
+| Total time | 8.69 s |
+| Throughput | 372 q/s |
+| P50 latency | 2.36 ms |
+| P95 latency | 3.80 ms |
+| P99 latency | 4.21 ms |
 
 ### Retrieval Quality (323 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 5.26% |
-| Recall@5 | 11.27% |
-| Recall@10 | 13.19% |
-| Recall@100 | 23.41% |
-| Precision@1 | 38.39% |
+| Recall@1 | 5.40% |
+| Recall@5 | 11.20% |
+| Recall@10 | 13.27% |
+| Recall@100 | 21.71% |
+| Precision@1 | 38.70% |
 | Precision@5 | 25.82% |
-| Precision@10 | 19.44% |
-| Precision@100 | 6.51% |
-| MRR | 0.4717 |
-| MAP | 0.1276 |
-| nDCG@10 | 0.2767 |
+| Precision@10 | 19.69% |
+| Precision@100 | 5.40% |
+| MRR | 0.4720 |
+| MAP | 0.1256 |
+| nDCG@10 | 0.2791 |
 
 ### Notes
 
@@ -161,26 +160,26 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 
 | Metric | Value |
 |--------|-------|
-| R@1 | 78.20% |
-| R@5 | 94.60% |
-| R@10 | 96.80% |
+| R@1 | 76.80% |
+| R@5 | 93.60% |
+| R@10 | 95.60% |
 
 ### Per-Category R@5
 
 | Category | R@5 | Count |
 |----------|-----|-------|
 | knowledge-update | 100.00% | 78/78 |
-| single-session-user | 98.57% | 69/70 |
-| multi-session | 96.99% | 129/133 |
-| temporal-reasoning | 95.49% | 127/133 |
-| single-session-assistant | 91.07% | 51/56 |
-| single-session-preference | 63.33% | 19/30 |
+| single-session-user | 97.14% | 68/70 |
+| multi-session | 95.49% | 127/133 |
+| temporal-reasoning | 92.48% | 123/133 |
+| single-session-assistant | 96.43% | 54/56 |
+| single-session-preference | 60.00% | 18/30 |
 
 ### Notes
 
-- Correct session is in the top 5 for 473/500 questions.
+- Correct session is in the top 5 for 468/500 questions.
 - Knowledge updates are perfect (100% R@5).
-- Single-session preference is the weak spot (63.3%). Preferences are often implicit and require inference beyond literal text matching.
+- Single-session preference is the weak spot (60.0%). Preferences are often implicit and require inference beyond literal text matching.
 - Conditional chunking is essential here. Sessions average ~115K tokens, which would saturate a single fingerprint.
 
 ---
@@ -202,6 +201,6 @@ At 8.8M docs, each query visits roughly `64 × log(N)` ≈ 1,000–2,000 nodes. 
 - **Distance**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
 - **Search**: LSH seeds → HNSW layer-0 descent (efSearch=64).
 - **Lexical**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
-- **Fusion**: RRF (k=60).
+- **Fusion**: RRF (k=10).
 - **Reranking**: Term-coverage boost (weight=0.5) on top-K merged results.
 - **Metrics**: Computed against BEIR qrels (binary relevance), averaged only over queries with judgments. nDCG uses standard `1/log2(rank+1)` gain.

@@ -27,7 +27,7 @@ Chunk-to-parent mappings are appended to `chunks.bin` as `(parentId, chunkId)` p
 
 **Search.** The query string is encoded with the denser query probes. The semantic lane has two sub-lanes: (1) LSH seeds — all 50 bands of the query fingerprint are hashed and colliding IDs are collected and deduplicated; (2) HNSW descent — starting from the global entry point, greedy best-first search drops one layer at a time with `ef=1` until layer 0, where a beam search with `efSearch=64` explores the neighborhood. Both sub-lanes score candidates with weighted Jaccard: 50 % token block, 25 % bigram block, 25 % context block. Distance is `1.0 - jaccard`.
 
-The lexical lane runs independently: query tokens are looked up in the inverted index and scored with the same QLM formula. Results from both lanes are merged with weighted Reciprocal Rank Fusion (`rrfK = 60`, semantic weight 0.5, lexical weight 1.0). Memories present in both lanes receive a score boost. After fusion, chunk IDs are resolved to parent IDs via `chunkToParent`; duplicates are collapsed, keeping the highest score per parent. The top-k parents are then reranked by term-coverage boost: `coverage = |query_tokens ∩ doc_tokens| / |query_tokens|`, and `score += 0.5 * coverage`. This pushes exact-match and high-coverage memories to the top without discarding the semantic signal.
+The lexical lane runs independently: query tokens are looked up in the inverted index and scored with the same QLM formula. Results from both lanes are merged with Reciprocal Rank Fusion (`rrfK = 10`). Memories present in both lanes receive a score boost. After fusion, chunk IDs are resolved to parent IDs via `chunkToParent`; duplicates are collapsed, keeping the highest score per parent. The top-k parents are then reranked by term-coverage boost: `coverage = |query_tokens ∩ doc_tokens| / |query_tokens|`, and `score += 0.5 * coverage`. This pushes exact-match and high-coverage memories to the top without discarding the semantic signal.
 
 **Update.** `updateMemory(id, content)` performs a logical atomic delete-then-insert while preserving the parent ID. It calls `deleteMemory(id)` to remove all old chunks from every index (healing HNSW edges, reclaiming slots), then appends a new WAL record and re-inserts the content as if it were new, mapping fresh chunks back to the same parent ID.
 
@@ -167,8 +167,8 @@ chunks back to parent memories, deduplicated, and reranked by term coverage.
   |              semWeight, lexWeight)       |
   |                                          |
   |    RRF formula:                          |
-  |    score = w_sem/(rrfK+rank_sem)         |
-  |          + w_lex/(rrfK+rank_lex)         |
+  |    score = 1/(rrfK+rank_sem)             |
+  |          + 1/(rrfK+rank_lex)             |
   |                                          |
   |    Items in BOTH lanes get boosted       |
   +--------------------+---------------------+
@@ -379,13 +379,13 @@ Apple MacBook Air M2 (16 GB). Full tables and methodology in [`BENCHMARK.md`](BE
 
 | Dataset | Corpus | Indexing | Query (top-100) | nDCG@10 | R@5 |
 |---------|--------|----------|-----------------|---------|-----|
-| SciFact | 5,183 docs | 2,350 docs/s | 223 q/s | 0.557 | — |
-| NFCorpus | 3,633 docs | 2,175 docs/s | 361 q/s | 0.277 | — |
-| LongMemEval-S | 500 questions | — | — | — | 94.6% |
+| SciFact | 5,183 docs | 2,465 docs/s | 222 q/s | 0.579 | — |
+| NFCorpus | 3,633 docs | 2,445 docs/s | 372 q/s | 0.279 | — |
+| LongMemEval-S | 500 questions | — | — | — | 93.6% |
 
-SciFact: Recall@1 = 43.3%, MRR = 0.54. P50 latency ~4.4 ms for top-100.
+SciFact: Recall@1 = 43.5%, MRR = 0.55. P50 latency ~4.5 ms for top-100.
 NFCorpus: Precision@1 = 38.7%, MRR = 0.47. Hard medical retrieval task with sparse labels.
-LongMemEval-S: R@1 = 78.2%, R@5 = 94.6%. Conversational memory retrieval.
+LongMemEval-S: R@1 = 76.8%, R@5 = 93.6%. Conversational memory retrieval.
 
 ---
 
@@ -405,7 +405,7 @@ LongMemEval-S: R@1 = 78.2%, R@5 = 94.6%. Conversational memory retrieval.
 | `hnswEfConstruction` | 200 | HNSW build beam width |
 | `hnswEfSearch` | 64 | HNSW query beam width |
 | `dirichletMu` | 2000.0 | QLM smoothing parameter |
-| `rrfK` | 60 | RRF constant |
+| `rrfK` | 10 | RRF constant |
 | `rerankCoverageWeight` | 0.5 | Term-coverage boost weight |
 | `chunkSaturationThreshold` | 0.6 | Chunk when any block exceeds this saturation |
 
