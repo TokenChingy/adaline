@@ -379,8 +379,7 @@ nimble build_release
 nimble test
 
 # Compile benchmarks
-nimble bench_beir
-nimble bench_longmemeval
+nimble benchmark
 
 # Run BEIR benchmarks
 ./benchmarks/benchmark_beir scifact
@@ -389,6 +388,26 @@ nimble bench_longmemeval
 # Run LongMemEval benchmark
 ./benchmarks/benchmark_longmemeval
 ```
+
+---
+
+## Benchmarks
+
+All benchmarks below were run on an **Apple MacBook Air M2 (16 GB)**.
+
+| Dataset | Corpus | Indexing | Query (top-100) | nDCG@10 | R@5 |
+|---------|--------|----------|-----------------|---------|-----|
+| **SciFact** | 5,183 docs | 1,732 docs/s | 241 q/s (P50 4.2 ms) | 0.548 | — |
+| **NFCorpus** | 3,633 docs | 1,590 docs/s | 521 q/s (P50 2.1 ms) | 0.267 | — |
+| **LongMemEval-S** | 500 questions | — | — | — | 94.4% |
+
+### Highlights
+
+- **SciFact**: Recall@1 = 40.6%, MRR = 0.52. P50 query latency is ~4.2 ms for top-100 semantic+lexical fusion.
+- **NFCorpus**: A harder medical retrieval task. Precision@1 = 35.3%, MRR = 0.45. Query throughput reaches 521 q/s because the corpus is smaller.
+- **LongMemEval-S**: R@1 = 78.4%, R@5 = 94.4%. The correct conversational session is in the top 5 for 94 out of 100 questions, competitive with neural embedding baselines despite using no neural networks at all.
+
+See [`BENCHMARK.md`](BENCHMARK.md) for full per-dataset tables, per-category breakdowns, and historical results.
 
 ---
 
