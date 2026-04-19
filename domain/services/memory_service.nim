@@ -21,7 +21,6 @@ type
     corpus*: CorpusIndex
     maxHnswLayer*: int
     hnswEntryPoint*: uint64
-    memoryIdCounter*: uint64
     textCache*: Table[uint64, string]
     timestampCache*: Table[uint64, uint64]
     chunkToParent*: Table[uint64, uint64]
@@ -35,7 +34,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   result.corpus = CorpusIndex()
   result.maxHnswLayer = -1
   result.hnswEntryPoint = 0
-  result.memoryIdCounter = 0
   result.textCache = initTable[uint64, string]()
   result.timestampCache = initTable[uint64, uint64]()
   result.chunkToParent = initTable[uint64, uint64]()
@@ -93,13 +91,11 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
           result.hnswEntryPoint = chunkId
 
   if hasData:
-    result.memoryIdCounter = maxId + 1
-  else:
-    result.memoryIdCounter = 0
+    # Ensure storage header reflects the high-water mark of used slots
+    result.storage.syncRecordCount(maxId + 1)
 
 proc insert*(service: var MemoryService; content: string): uint64 =
-  let parentId = service.memoryIdCounter
-  service.memoryIdCounter += 1
+  let parentId = service.storage.allocSlot()
   let timestamp = uint64(getTime().toUnix())
 
   # 1. WAL stores the parent memory
@@ -132,8 +128,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
   else:
     # Chunked: create multiple indexable units
     for chunkText in chunks:
-      let chunkId = service.memoryIdCounter
-      service.memoryIdCounter += 1
+      let chunkId = service.storage.allocSlot()
       service.chunkToParent[chunkId] = parentId
       discard service.storage.appendChunkMapping(parentId, chunkId)
 
@@ -149,6 +144,48 @@ proc insert*(service: var MemoryService; content: string): uint64 =
                  service.cfg, service.maxHnswLayer, service.hnswEntryPoint)
 
   result = parentId
+
+proc deleteMemory*(service: var MemoryService; parentId: uint64) =
+  ## Delete a memory and all its chunks. Frees slots for reuse.
+  ## Note: WAL does not currently persist tombstones; deleted memories
+  ## will reappear on restart until checkpointing is implemented.
+  if not service.textCache.hasKey(parentId):
+    return
+
+  let content = service.textCache[parentId]
+
+  # Find all chunk IDs for this parent
+  var chunkIds = newSeq[uint64]()
+  for chunkId, pid in service.chunkToParent:
+    if pid == parentId:
+      chunkIds.add(chunkId)
+
+  # If unchunked, the parent is its own chunk
+  if chunkIds.len == 0:
+    chunkIds.add(parentId)
+
+  for chunkId in chunkIds:
+    # Remove from LSH (needs fingerprint before freeing slot)
+    let fpPtr = service.storage.getFingerprintPtr(chunkId)
+    removeLsh(service.lsh, fpPtr, chunkId)
+
+    # Remove from lexical index
+    let chunkText = if chunkId == parentId: content
+                    else: service.textCache.getOrDefault(service.chunkToParent.getOrDefault(chunkId, chunkId), "")
+    removeMemory(service.lexical, chunkId, chunkText)
+
+    # Free the storage slot
+    service.storage.freeSlot(chunkId)
+
+    # Remove chunk→parent mapping
+    service.chunkToParent.del(chunkId)
+
+  # Remove parent from caches
+  service.textCache.del(parentId)
+  service.timestampCache.del(parentId)
+
+  # Sync header to disk after delete
+  service.storage.syncHeader()
 
 proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   let qfp = encodeSdr(query, service.cfg, service.corpus, isQuery = true)

@@ -14,6 +14,29 @@ proc tokenize*(text: string): seq[string] =
     if token.len > 0:
       result.add(token)
 
+proc removeMemory*(index: var LexicalIndex; memoryId: uint64; text: string) =
+  let tokens = tokenize(text)
+  index.totalCorpusTokens -= uint64(tokens.len)
+  index.memLengths.del(memoryId)
+
+  var termFreqs = initCountTable[string]()
+  for token in tokens:
+    termFreqs.inc(token)
+
+  for term, freq in termFreqs:
+    if index.corpusTermFreqs.hasKey(term):
+      index.corpusTermFreqs[term] -= uint64(freq)
+      if index.corpusTermFreqs[term] == 0:
+        index.corpusTermFreqs.del(term)
+    if index.postings.hasKey(term):
+      var newPostings = newSeq[tuple[memoryId: uint64, freq: uint32]]()
+      for (mid, f) in index.postings[term]:
+        if mid != memoryId:
+          newPostings.add((mid, f))
+      index.postings[term] = newPostings
+      if index.postings[term].len == 0:
+        index.postings.del(term)
+
 proc addMemory*(index: var LexicalIndex; memoryId: uint64; text: string) =
   let tokens = tokenize(text)
   index.memLengths[memoryId] = uint32(tokens.len)

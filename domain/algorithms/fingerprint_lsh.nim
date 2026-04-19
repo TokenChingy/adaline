@@ -31,6 +31,19 @@ proc insertLsh*(index: var FingerprintLshIndex; fp: ptr Fingerprint; memoryId: u
     let key = (b, bh)
     index.buckets.mgetOrPut(key, @[]).add(memoryId)
 
+proc removeLsh*(index: var FingerprintLshIndex; fp: ptr Fingerprint; memoryId: uint64) =
+  for b in 0 ..< index.cfg.lshBands:
+    let bh = bandHash(fp, b, index.cfg.lshRows)
+    let key = (b, bh)
+    if index.buckets.hasKey(key):
+      var newIds = newSeq[uint64]()
+      for id in index.buckets[key]:
+        if id != memoryId:
+          newIds.add(id)
+      index.buckets[key] = newIds
+      if index.buckets[key].len == 0:
+        index.buckets.del(key)
+
 proc queryLsh*(index: FingerprintLshIndex; fp: ptr Fingerprint): seq[uint64] =
   var seen = initHashSet[uint64]()
   for b in 0 ..< index.cfg.lshBands:
