@@ -367,6 +367,7 @@ nimble test
 nimble benchmark
 ./benchmarks/beir scifact
 ./benchmarks/beir nfcorpus
+./benchmarks/beir arguana
 ./benchmarks/longmemeval
 ./benchmarks/crud scifact 1000 1000
 ```
@@ -381,10 +382,12 @@ Apple MacBook Air M2 (16 GB). Full tables and methodology in [`BENCHMARK.md`](BE
 |---------|--------|----------|-----------------|---------|-----|
 | SciFact | 5,183 docs | 2,465 docs/s | 222 q/s | 0.579 | — |
 | NFCorpus | 3,633 docs | 2,445 docs/s | 372 q/s | 0.279 | — |
+| ArguAna | 8,674 docs | 3,724 docs/s | 43 q/s | 0.226 | — |
 | LongMemEval-S | 500 questions | — | — | — | 93.6% |
 
 SciFact: Recall@1 = 43.5%, MRR = 0.55. P50 latency ~4.5 ms for top-100.
 NFCorpus: Precision@1 = 38.7%, MRR = 0.47. Hard medical retrieval task with sparse labels.
+ArguAna: Recall@1 = 0%, MRR = 0.16. Adversarial counter-argument retrieval; semantic similarity cannot distinguish opposing stances.
 LongMemEval-S: R@1 = 76.8%, R@5 = 93.6%. Conversational memory retrieval.
 
 ---

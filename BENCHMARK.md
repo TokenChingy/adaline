@@ -15,6 +15,7 @@ nimble benchmark
 ```bash
 ./benchmarks/beir scifact    # ~5K docs, fast
 ./benchmarks/beir nfcorpus   # ~3.6K docs, fast
+./benchmarks/beir arguana    # ~8.7K docs, adversarial counter-arguments
 ./benchmarks/beir msmarco    # ~8.8M docs, very slow, 1GB+ download
 ```
 
@@ -147,6 +148,54 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 - Low recall because the task is passage retrieval from long abstracts with very few labeled positives per query.
 - Query throughput is higher than SciFact because the corpus is smaller. HNSW search time scales sub-linearly with corpus size.
 - Some medical abstracts are long enough to trigger chunking.
+
+---
+
+## ArguAna
+
+8,674 documents. 1,406 queries (all with qrels). Adversarial counter-argument retrieval — queries are counter-arguments to the target document, so relevant docs are semantically near-identical but opposite in stance.
+
+### Indexing
+
+| Statistic | Value |
+|-----------|-------|
+| Total time | 2.33 s |
+| Throughput | 3,724 docs/s |
+| P50 latency | 0.22 ms |
+| P95 latency | 0.57 ms |
+| P99 latency | 0.88 ms |
+
+### Query (top-100)
+
+| Statistic | Value |
+|-----------|-------|
+| Total time | 32.37 s |
+| Throughput | 43 q/s |
+| P50 latency | 21.01 ms |
+| P95 latency | 39.58 ms |
+| P99 latency | 52.42 ms |
+
+### Retrieval Quality (1,406 judged queries)
+
+| Metric | Value |
+|--------|-------|
+| Recall@1 | 0.00% |
+| Recall@5 | 33.29% |
+| Recall@10 | 50.43% |
+| Recall@100 | 95.45% |
+| Precision@1 | 0.00% |
+| Precision@5 | 6.66% |
+| Precision@10 | 5.04% |
+| Precision@100 | 1.01% |
+| MRR | 0.1584 |
+| MAP | 0.1584 |
+| nDCG@10 | 0.2264 |
+
+### Notes
+
+- ArguAna is deliberately adversarial: the correct document is topically identical but stance-opposed. Jaccard-based semantic similarity cannot distinguish "for" from "against," so R@1 is zero.
+- The lexical lane carries most of the signal here (R@100 = 95.5%), but without stance-aware reranking the correct document rarely cracks the top 10.
+- Query latency is higher than SciFact/NFCorpus because the corpus is larger (~8.7K docs) and queries are longer, more lexically complex arguments.
 
 ---
 
