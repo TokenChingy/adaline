@@ -15,7 +15,7 @@
 
 ### 1. Pre-Allocated Growth Regions
 
-Instead of closing/reopening the mmap on every grow, **pre-allocate in large chunks** (e.g., 64 MB) and remap only when the chunk is exhausted. On Linux, use `mremap` to resize without unmapping. On macOS, `munmap` + `mmap` is acceptable because it happens logarithmically rarely.
+Instead of closing/reopening the mmap on every grow, **pre-allocate in large chunks** (e.g., 64 MB) and remap only when the chunk is exhausted. `munmap` + `mmap` happens rarely because a single 64 MB chunk holds ~52K fingerprints.
 
 ```
 Current:  grow from 1024 → 2048 → 4096 → 8192 slots (4 remaps for 8× growth)
@@ -47,7 +47,7 @@ Every store file starts with a 256-byte header:
 | 6 | 2 | Record size (bytes) |
 | 8 | 8 | Record count (used slots) |
 | 16 | 8 | Capacity (allocated slots) |
-| 24 | 8 | Freelist head slot index (0 = empty) |
+| 24 | 8 | Freelist head slot index (`uint64.high` = empty) |
 | 32 | 8 | Freelist count |
 | 40 | 216 | Reserved / padding |
 
@@ -121,24 +121,20 @@ Option B: **Unified file** with page types (like SQLite). More complex; start wi
 - Switch from byte-offset IDs to slot-index IDs.
 - Update all pointer math in memory_service, hnsw_graph, etc.
 
-### Phase 2: Pre-Allocated Growth
+### Phase 2: Pre-Allocated Growth + Freelist
 - Pre-allocate 64MB chunks instead of doubling.
-- Use `mremap` on Linux where available.
-- Benchmark insert speed.
-
-### Phase 3: Freelist
-- Add freelist push/pop to headers.
+- Add freelist push/pop to headers (in-band linked list).
 - Add `deleteMemory()` to memory_service.
 - HNSW graph nodes for deleted slots marked with `layerCount = 0`.
 
-### Phase 4: Persisted Indexes
+### Phase 3: Persisted Indexes
 - Serialize LSH buckets to `lsh.bin`.
 - Serialize lexical index to `lexical.bin`.
 - Serialize corpus index to `corpus.bin`.
 - Add `checkpoint()` API.
-- Benchmark startup time.
+- On startup: load persisted indexes, replay only WAL entries after checkpoint offset.
 
-### Phase 5: mmap Reads + Explicit Writes
+### Phase 4: mmap Reads + Explicit Writes (future)
 - Open stores as `fmRead` during queries.
 - Open stores as `fmReadWrite` only during ingestion.
 - Use heap buffers for mutations, `pwrite` for commits.
