@@ -1,4 +1,4 @@
-import ../domain/services/memory_service
+import ../domain/services/memory/update
 
 type
   UpdateMemoryInput* = object

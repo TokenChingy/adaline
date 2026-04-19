@@ -5,6 +5,7 @@ import domain/entities/memory
 import use_cases/insert_memory
 import use_cases/search_memories
 import use_cases/update_memory
+import use_cases/delete_memory
 
 const
   AppName = "Adaline"
@@ -81,7 +82,7 @@ proc cmdUpdate(args: seq[string]) =
     stderr.writeLine("Error: no content to update")
     quit(1)
 
-  updateMemory(service, UpdateMemoryInput(memoryId: id, content: content))
+  discard updateMemory(service, UpdateMemoryInput(memoryId: id, content: content))
   let ts = service.timestampCache.getOrDefault(id, 0)
   echo "Updated: id=", id, " at ", formatTimestamp(ts)
   echo "Total indexed: ", service.textCache.len, " memories"
@@ -96,7 +97,7 @@ proc cmdDelete(args: seq[string]) =
     quit(1)
 
   let id = parseId(args[0])
-  service.deleteMemory(id)
+  discard deleteMemory(service, DeleteMemoryInput(memoryId: id))
   echo "Deleted: id=", id
   echo "Total indexed: ", service.textCache.len, " memories"
 

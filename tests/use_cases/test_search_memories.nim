@@ -1,6 +1,6 @@
 import unittest
 import std/[strutils, os]
-import ../../domain/services/memory_service
+import ../../domain/services/memory/init
 import ../../domain/entities/config
 import ../../use_cases/insert_memory
 import ../../use_cases/search_memories

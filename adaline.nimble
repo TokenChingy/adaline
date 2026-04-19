@@ -8,10 +8,15 @@ bin           = @["adaline"]
 
 # Dependencies
 requires "nim >= 2.0.0"
+requires "nimpy >= 0.2.0"
 
 # Tasks
 task release, "Compile adaline CLI in release mode":
   exec "nim c -d:release -o:adaline adaline.nim"
+
+task python, "Build Python bindings":
+  let nimpyPath = gorgeEx("nimble path nimpy").output.strip()
+  exec "nim c -d:release --app:lib --path:\"" & nimpyPath & "\" -o:bindings/adaline.so bindings/adaline.nim"
 
 task benchmark, "Compile benchmarks in release mode":
   exec "nim c -d:release -o:benchmarks/benchmark_beir benchmarks/benchmark_beir.nim"
@@ -32,6 +37,7 @@ task test, "Compile and run all tests":
     "tests/domain/test_memory_service.nim",
     "tests/use_cases/test_insert_memory.nim",
     "tests/use_cases/test_search_memories.nim",
-    "tests/use_cases/test_update_memory.nim"
+    "tests/use_cases/test_update_memory.nim",
+    "tests/use_cases/test_delete_memory.nim"
   ]:
     exec "nim c -r " & f

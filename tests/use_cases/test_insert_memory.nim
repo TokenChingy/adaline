@@ -1,5 +1,6 @@
 import unittest
-import ../../domain/services/memory_service
+import ../../domain/services/memory/init
+import ../../domain/services/memory/search
 import ../../domain/entities/config
 import ../../use_cases/insert_memory
 import std/os

@@ -1,4 +1,4 @@
-import ../domain/services/memory_service
+import ../domain/services/memory/search
 import ../domain/entities/memory
 
 type

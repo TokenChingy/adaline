@@ -14,6 +14,7 @@ The entire index is laid out as contiguous byte arrays on disk with 256-byte sel
 use_cases/          <- One file per use-case. Each file declares its own
                        input/output ports (contracts). No business logic here;
                        only wiring and orchestration.
+                       (insert, search, update, delete)
 domain/entities/    <- Core types: Fingerprint, HNSW node, Memory, Config, Chunk.
 domain/algorithms/  <- The math:
                        - SDR encoder (partitioned Tokens / Bigrams / XOR Context)
@@ -25,10 +26,14 @@ domain/algorithms/  <- The math:
                        - RRF merger
                        - Reranker (term-coverage boost)
                        - Chunker (conditional sentence-aware splitting)
-domain/services/    <- Pure domain orchestration (MemoryService).
+domain/services/    <- Pure domain orchestration. `memory_service.nim` is the umbrella
+                       re-export; each operation lives in `memory/` (types, init,
+                       insert, delete, update, search, checkpoint). Import the
+                       specific file when working on a single use case.
  infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        graph store, chunks mapping store). Imported by domain
                        services when needed.
+bindings/           <- Python bindings (nimpy) exposing the same use cases.
 benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark.
 tests/              <- Unit tests mirroring the folder layout.
 adaline.nim         <- The CLI entry point.
@@ -57,6 +62,7 @@ Use Cases ← Domain ← Infrastructure
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
 - **Delete / Update:** `deleteMemory()` and `updateMemory()` use an in-memory reverse edge index to heal HNSW neighbor lists without tombstones or full rebuilds
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
+- **Python bindings:** `bindings/adaline.nim` exposes `Engine` (insert, search, update, delete, stats, checkpoint) via nimpy. Build with `nimble python`.
 
 ## Agent hygiene
 
