@@ -93,13 +93,13 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
           result.hnswEntryPoint = chunkId
 
   if hasData:
-    result.memoryIdCounter = maxId + uint64(cfg.fingerprintBytes)
+    result.memoryIdCounter = maxId + 1
   else:
     result.memoryIdCounter = 0
 
 proc insert*(service: var MemoryService; content: string): uint64 =
   let parentId = service.memoryIdCounter
-  service.memoryIdCounter += uint64(service.cfg.fingerprintBytes)
+  service.memoryIdCounter += 1
   let timestamp = uint64(getTime().toUnix())
 
   # 1. WAL stores the parent memory
@@ -133,7 +133,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
     # Chunked: create multiple indexable units
     for chunkText in chunks:
       let chunkId = service.memoryIdCounter
-      service.memoryIdCounter += uint64(service.cfg.fingerprintBytes)
+      service.memoryIdCounter += 1
       service.chunkToParent[chunkId] = parentId
       discard service.storage.appendChunkMapping(parentId, chunkId)
 
