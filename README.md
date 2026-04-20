@@ -1,346 +1,71 @@
 # Adaline
 
-A Nim vector search engine that turns text into **10240-bit sparse fingerprints** and searches them with HNSW + LSH, plus a lexical index for token-based matching. Results are fused with Reciprocal Rank Fusion and reranked by term coverage.
+A Nim-based vector search engine that converts text into **10,240-bit sparse fingerprints**. It utilizes a dual-lane retrieval architecture, running semantic search (HNSW + LSH) and lexical matching (Inverted Index + QLM) in parallel. Results are fused via Reciprocal Rank Fusion (RRF) and reranked by term coverage.
 
 ---
 
-## How it works
+## Core Architecture 
 
-Adaline uses a **dual-lane retrieval architecture**: every document is indexed simultaneously into a **semantic lane** (sparse fingerprint + HNSW graph + LSH seeds) and a **lexical lane** (inverted index with QLM scoring). At query time both lanes run in parallel; their results are fused with Reciprocal Rank Fusion and reranked by term coverage.
+Adaline bypasses traditional database overhead by operating entirely on memory-mapped files. 
 
-### Flow overview
-
-All storage is slot-addressed memory-mapped flat files with 256-byte self-describing headers (`ADLN` magic). Fingerprint slots are 1280 bytes; graph nodes are 1032 bytes. Files grow in 64 MiB pre-allocated chunks to minimize `mmap` remaps. IDs are dense integers starting at 0; deleted slots are pushed onto a freelist implemented as a linked list in the first 8 bytes of each freed fingerprint slot.
-
-**Insert.** `allocId()` hands out a slot from the freelist or appends a new one. The WAL record is `(memoryId: uint64, timestamp: uint64, textLen: uint32, text)` — append-only, flushed immediately. The text is then conditionally chunked: the chunker estimates saturation for each of the three fingerprint blocks (token, character-bigram, XOR-context) against `chunkSaturationThreshold` (default 0.6). If any block would exceed 60 % saturation, the text is split on sentence boundaries (`., !, ?`) with one-sentence overlap between chunks.
-
-Each chunk is encoded into a 10240-bit sparse fingerprint. The encoder partitions the bitmap into three regions: 4096 bits for tokens, 3072 bits for character bigrams, and 3072 bits for XOR-bounded context. Tokens and bigrams are hashed into bit positions with a custom 64-bit hash; multiple probes per feature use different seeds so a single token can set more than one bit. Prefix/suffix 4-grams are also encoded for morphological robustness. Token-bigram co-occurrences are encoded in the token block. The context block binds each token to its left and right neighbor via `hash(token) xor hash(neighbor)`, producing order-aware bits without fixed windows. For queries, `queryProbeMultiplier = 2.0` makes the query fingerprint roughly twice as dense as insert fingerprints, compensating for the sparsity of short queries.
-
-Probe counts are scaled by IDF squared via the corpus index: rare tokens get more probes, common tokens get fewer. This keeps frequent stopwords from saturating the bitmap while concentrating representational budget on discriminative terms.
-
-Each chunk fingerprint is written to the fingerprint store, then indexed three ways:
-- **LSH** — GoldFinger-style direct banding: the fingerprint's 160 uint64 segments are partitioned into 50 bands of 2 rows each. A band hash XORs its segments with two mixing constants. Two similar fingerprints share many identical segments, so they collide in the same LSH buckets with high probability.
-- **HNSW** — Layer assignment uses an exponential distribution (`rand < 0.5` per layer, max 8 layers). Insertion descends from the entry point: greedy best-first search (`ef=1`) from the top layer down to the target layer, then a wider beam search (`efConstruction=200`) at the insertion layer to select up to 32 neighbors. Edges are bidirectional: when node A adds B, B also adds A (subject to B's 32-neighbor limit, pruned by weighted Jaccard distance). A reverse edge index (`node → predecessors`) is maintained in memory so deletions can heal the graph without a full rebuild.
-- **Lexical** — Text is tokenized on non-alphanumeric boundaries. The index stores postings `(memoryId, freq)` per term, plus per-document lengths and corpus term frequencies. Scoring uses Query Likelihood with Dirichlet smoothing (`mu = 2000`): each matching term contributes `ln(1 + freq / (μ * pqc))`, where `pqc` is the term's corpus frequency ratio. A length-normalization term is added per document.
-
-Chunk-to-parent mappings are appended to `chunks.bin` as `(parentId, chunkId)` pairs and kept in an in-memory table.
-
-**Search.** The query string is encoded with the denser query probes. The semantic lane has two sub-lanes: (1) LSH seeds — all 50 bands of the query fingerprint are hashed and colliding IDs are collected and deduplicated; (2) HNSW descent — starting from the global entry point, greedy best-first search drops one layer at a time with `ef=1` until layer 0, where a beam search with `efSearch=64` explores the neighborhood. Both sub-lanes score candidates with weighted Jaccard: 50 % token block, 25 % bigram block, 25 % context block. Distance is `1.0 - jaccard`.
-
-The lexical lane runs independently: query tokens are looked up in the inverted index and scored with the same QLM formula. Results from both lanes are merged with Reciprocal Rank Fusion (`rrfK = 10`). Memories present in both lanes receive a score boost. After fusion, chunk IDs are resolved to parent IDs via `chunkToParent`; duplicates are collapsed, keeping the highest score per parent. The top-k parents are then reranked by term-coverage boost: `coverage = |query_tokens ∩ doc_tokens| / |query_tokens|`, and `score += 0.5 * coverage`. This pushes exact-match and high-coverage memories to the top without discarding the semantic signal.
-
-**Update.** `updateMemory(id, content)` performs a logical atomic delete-then-insert while preserving the parent ID. It calls `deleteMemory(id)` to remove all old chunks from every index (healing HNSW edges, reclaiming slots), then appends a new WAL record and re-inserts the content as if it were new, mapping fresh chunks back to the same parent ID.
-
-**Delete.** `deleteMemory(id)` collects every chunk belonging to the parent. For each chunk, it heals the HNSW graph in both directions: forward edges (removing the chunk from its neighbors' reverse-index entries) and backward edges (removing the chunk from each predecessor's neighbor list using the reverse index). The chunk is then removed from LSH buckets (re-hashing its fingerprint bands), from lexical postings (decrementing term frequencies and corpus counts), and from the chunk mapping table. Finally `freeId(chunkId)` pushes the slot onto the freelist by writing the current freelist head into the first 8 bytes of the fingerprint slot and zeroing the graph node. The header is synced to disk so the freelist survives restarts.
-
-**Checkpoint & restart.** `checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to `lsh.bin`, `lexical.bin`, and `corpus.bin`, embedding the current WAL offset. On restart, the engine loads the persisted indexes, replays only the WAL entries after the checkpoint offset, and rebuilds the HNSW reverse edge index by scanning all graph nodes. This turns a full WAL replay into a partial one.
+* **Zero-Copy Storage:** All data lives in slot-addressed, memory-mapped flat files (`.bin`) with 256-byte self-describing headers. Files grow in pre-allocated 64 MiB chunks to minimize `mmap` remaps.
+* **Efficient Memory Management:** IDs are dense integers starting at 0. Deleted slots are pushed to a freelist stored directly in the first 8 bytes of freed fingerprint slots.
+* **The Dual-Lane Highway:** Every document is indexed into both a Semantic Lane (for fuzzy, conceptual matching) and a Lexical Lane (for precise, token-based matching).
 
 ---
 
-### Insert
+## System Workflows
 
-Takes a text string, writes it to the WAL, and indexes it across three lanes:
-an LSH index (for seeding), an HNSW graph (for approximate search), and a
-lexical inverted index (for token matching). Long text is automatically split
-into sentence-aware chunks; each chunk gets its own fingerprint and graph node.
+### 1. Insert & Indexing
+Takes a text string, writes it to the Write-Ahead Log (WAL), and indexes it across all routing lanes. 
 
-```
-  INPUT: content (string)
-         │
-         ▼
-  +-----------------------------------------+
-  | 1. ALLOCATE PARENT ID                   |
-  |    allocId() --> parentId (uint64)      |
-  |                                         |
-  | 2. WRITE-AHEAD LOG (durability)         |
-  |    wal.bin += (parentId, timestamp,     |
-  |                 content)                |
-  |                                         |
-  | 3. UPDATE IN-MEMORY TABLES              |
-  |    textCache[parentId] = content        |
-  |    timestampCache[parentId] = now       |
-  |    corpus.addMemory(content)            |
-  |      --> updates doc-freq / IDF tables  |
-  +--------------------+--------------------+
-                       |
-                       ▼
-  +-----------------------------------------+
-  | 4. CHUNKING                             |
-  |    splitIntoChunks(content, cfg)        |
-  |                                         |
-  |    +-- short text --+  +-- long text --+|
-  |    | 1 chunk only   |  | N chunks      ||
-  |    | (no split)     |  | (sentence-    ||
-  |    +--------+-------+  |  aware)       ||
-  |             |          +--------+------+|
-  +-------------|------------------|--------+
-                |                  |
-                ▼                  ▼
-  +--------------+    +---------------------------+
-  | parentId IS  |    | for each chunkText:       |
-  | the chunkId  |    |   allocId() --> chunkId   |
-  |              |    |                           |
-  | encodeSdr()  |    |   chunkToParent[chunkId]  |
-  |   10240-bit  |    |     = parentId            |
-  |   fingerprint|    |   chunks.bin += mapping   |
-  |              |    |                           |
-  | write to:    |    |   encodeSdr() --> fp      |
-  | fingerprints |    |     10240-bit fingerprint |
-  | .bin[id]     |    |   write to:               |
-  |              |    |   fingerprints.bin[id]    |
-  | lshInsert()  |    |                           |
-  |   buckets[   |    |   lshInsert()             |
-  |   band,hash] |    |     buckets[band,hash]    |
-  |              |    |     += chunkId            |
-  | lexicalAdd() |    |                           |
-  |   postings[  |    |   lexicalAdd()            |
-  |   term] +=   |    |     postings[term]        |
-  |   (id,freq)  |    |     += (chunkId, freq)    |
-  |              |    |                           |
-  | hnswInsert() |    |   hnswInsert()            |
-  |   graph.bin  |    |     graph.bin[id]         |
-  |   [id]       |    |     gets edges + layer    |
-  +--------------+    +---------------------------+
-                |                  |
-                +--------+---------+
-                         |
-                         ▼
-                OUTPUT: parentId (uint64)
-```
+1. **Allocate & Log:** `allocId()` fetches a slot from the freelist. The record `(memoryId, timestamp, textLen, text)` is appended to `wal.bin` and flushed instantly.
+2. **Dynamic Chunking:** The engine estimates saturation for the token, character-bigram, and XOR-context blocks. If any block hits the `chunkSaturationThreshold` (60%), the text is split on sentence boundaries with a one-sentence overlap.
+3. **Encoding:** Each chunk is encoded into a 10,240-bit fingerprint. Probe counts are scaled by IDF-squared (rare tokens get more probes; stopwords get fewer). 
+4. **LSH Routing (Semantic):** The fingerprint is partitioned into 50 bands of 2 rows for GoldFinger-style direct banding, inserting the chunk into the `lsh.bin` buckets.
+5. **HNSW Routing (Semantic):** The chunk descends the `graph.bin` layers via greedy best-first search, wiring bidirectional edges pruned by weighted Jaccard distance.
+6. **Lexical Routing:** Text is tokenized on non-alphanumeric boundaries and added to the inverted index using Query Likelihood with Dirichlet smoothing ($\mu = 2000$).
 
-### Search
+### 2. Search & Retrieval
+Executes a parallel query across both lanes, merges the candidates, and isolates the highest-relevance parents.
 
-Takes a query string, runs it through both a **semantic lane** (fingerprint
-similarity via HNSW) and a **lexical lane** (inverted index with QLM scoring),
-then fuses the two lists with Reciprocal Rank Fusion. Results are mapped from
-chunks back to parent memories, deduplicated, and reranked by term coverage.
+1. **Query Encoding:** The query is encoded with a `queryProbeMultiplier` of 2.0 to compensate for the sparsity of short queries.
+2. **Semantic Lane:** The 50 LSH bands are hashed to collect candidate seeds. These seeds are dropped into Layer 0 of the HNSW graph, triggering a beam search (`efSearch=64`). Candidates are scored using Weighted Jaccard.
+3. **Lexical Lane:** Query tokens are concurrently routed through the inverted index and scored via QLM.
+4. **Fusion & Resolution:** Both lanes are merged using Reciprocal Rank Fusion (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
+5. **Rerank:** Top candidates receive a final term-coverage boost (`+ 0.5 * coverage`) to push exact matches to the top of the result list.
 
-```
-  INPUT: query (string), k (int)
-         |
-         ▼
-  +------------------------------------------+
-  | 1. QUERY FINGERPRINT                     |
-  |    encodeSdr(query, isQuery=true)        |
-  |      --> denser probes than insert       |
-  |      --> qfp (10240-bit fingerprint)     |
-  +--------------------+---------------------+
-                       |
-         +-------------+-------------+
-         |                           |
-         ▼                           ▼
-  +-----------------+      +-------------------+
-  | 2a. LSH SEEDS   |      | 2b. HNSW SEARCH   |
-  |                 |      |                   |
-  | queryLsh(qfp)   |      | searchHnsw(       |
-  |   band-hash each|      |   seeds,          |
-  |   band of qfp   |      |   entryPoint,     |
-  |   collect all   |      |   qfp, k, cfg)    |
-  |   colliding IDs |      |                   |
-  +--------+--------+      | greedy best-      |
-           |               | first descent     |
-           |               | per layer         |
-           |               |                   |
-           |               | weighted Jaccard  |
-           |               | vs. qfp           |
-           |               +---------+---------+
-           |                         |
-           |                         |
-  +--------+--------+                |
-  | 3. LEXICAL LANE |<---------------+
-  |                 |
-  | searchLexical(  |
-  |   query, k)     |
-  |                 |
-  | tokenize query  |
-  | score each doc  |
-  | with QLM +      |
-  | Dirichlet(mu)   |
-  +--------+--------+
-           |
-           ▼
-  +------------------------------------------+
-  | 4. FUSION                                |
-  |    mergeRrf(semanticResults,             |
-  |              lexicalResults,             |
-  |              k, rrfK,                    |
-  |              semWeight, lexWeight)       |
-  |                                          |
-  |    RRF formula:                          |
-  |    score = 1/(rrfK+rank_sem)             |
-  |          + 1/(rrfK+rank_lex)             |
-  |                                          |
-  |    Items in BOTH lanes get boosted       |
-  +--------------------+---------------------+
-                       |
-                       ▼
-  +------------------------------------------+
-  | 5. CHUNK --> PARENT RESOLUTION           |
-  |    for each merged chunkId:              |
-  |      parentId = chunkToParent.getOrDef(  |
-  |                 chunkId, chunkId)        |
-  |    deduplicate by parent, keep max score |
-  +--------------------+---------------------+
-                       |
-                       ▼
-  +------------------------------------------+
-  | 6. RERANK                                |
-  |    sort by score desc                    |
-  |    trim to k                             |
-  |    rerank(query, candidates,             |
-  |           textCache, cfg)                |
-  |      --> term-coverage boost             |
-  |      --> exact match --> top             |
-  +--------------------+---------------------+
-                       |
-                       ▼
-              OUTPUT: seq[Memory]
-                      {id, content, score, createdAt}
-```
+### 3. Update
+Performs a logical atomic delete-then-insert. It calls the Delete workflow to wipe the old chunks and heal the graph, then appends a new WAL record and re-inserts the updated content, seamlessly mapping the fresh chunks back to the original parent ID.
 
-### Update
+### 4. Delete
+Physically removes a memory from every index and heals the surrounding data structures.
 
-Preserves the parent ID while atomically replacing the content. The old chunks
-are deleted (healing the HNSW graph and freeing slots) and new chunks are
-inserted with the **same** parent ID.
+1. **Collect:** Identify all chunk IDs associated with the target parent ID.
+2. **Heal Graph:** For each chunk, sever forward edges and backward edges. An in-memory reverse edge index is used to remove the chunk from all predecessors' neighbor lists without a full graph rebuild.
+3. **Purge Indexes:** Remove the chunk from the LSH buckets and decrement its term frequencies from the lexical postings.
+4. **Free ID:** Zero out the graph node and push the slot back to the `mmap` freelist.
 
-```
-  INPUT: id (uint64), content (string)
-         |
-         ▼
-      +--+--+
-      |known?|    -->  textCache.hasKey(id)
-      +--+--+
-       no/ \yes
-         /   \
-        ▼     ▼
-     (no-op)  |
-              ▼
-  +------------------------------------------+
-  | 1. DELETE OLD                            |
-  |    deleteMemory(service, id)             |
-  |                                          |
-  |    |-- find all chunkIds for this parent |
-  |    |-- heal HNSW forward edges           |
-  |    |    (remove from reverseIndex[N])    |
-  |    |-- heal HNSW backward edges          |
-  |    |    (remove from predecessors' lists)|
-  |    |-- remove from LSH buckets           |
-  |    |-- remove from lexical postings      |
-  |    |-- freeId(chunkId) --> freelist      |
-  |    |-- del chunkToParent[chunkId]        |
-  |                                          |
-  |    |-- del textCache[id]                 |
-  |       del timestampCache[id]             |
-  +--------------------+---------------------+
-                       |
-                       ▼
-  +------------------------------------------+
-  | 2. INSERT NEW (same parentId)            |
-  |                                          |
-  |    wal.bin += (id, newTimestamp, content)|
-  |    textCache[id] = content               |
-  |    corpus.addMemory(content)             |
-  |    chunk, encode, index exactly like     |
-  |    Insert step 4-5 above                 |
-  |    ...but reuse parentId as root         |
-  +--------------------+---------------------+
-                       |
-                       ▼
-              OUTPUT: id (unchanged)
-```
+### 5. Checkpoint & Restart
+`checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to disk, embedding the current WAL offset. On restart, Adaline loads the persisted indexes, replays only the un-checkpointed WAL tail, and rebuilds the HNSW reverse edge index in memory.
 
-### Delete
+---
 
-Physically removes a memory and all its chunks from every index. Uses an
-in-memory **reverse edge index** to heal HNSW neighbor lists so no orphaned
-references remain. Freed IDs go to a freelist for reuse.
-
-```
-  INPUT: id (uint64)
-         |
-         ▼
-      +--+--+
-      |known?|    -->  textCache.hasKey(id)
-      +--+--+
-       no/ \yes
-         /   \
-        ▼     ▼
-     (no-op)  |
-              ▼
-  +------------------------------------------+
-  | 1. COLLECT CHUNKS                        |
-  |    chunkIds = all entries in             |
-  |    chunkToParent where value == id       |
-  |                                          |
-  |    (if none, treat parent as unchunked   |
-  |     and use id itself)                   |
-  +--------------------+---------------------+
-                       |
-                       ▼
-  +------------------------------------------+
-  | 2. FOR EACH CHUNK                        |
-  |                                          |
-  |    |-- HEAL FORWARD EDGES                |
-  |    |   for each layer of chunk's node:   |
-  |    |     for each neighbor N:            |
-  |    |       reverseIndex[N].del(chunkId)  |
-  |    |                                     |
-  |    |-- HEAL BACKWARD EDGES               |
-  |    |   for each M in reverseIndex[chunkId|
-  |    |     for each layer of M's node:     |
-  |    |       removeNeighbor(M, layer,      |
-  |    |                      chunkId)       |
-  |    |   del reverseIndex[chunkId]         |
-  |    |                                     |
-  |    |-- REMOVE FROM LSH                   |
-  |    |   removeLsh(lsh, fpPtr, chunkId)    |
-  |    |     re-hashes bands, removes id     |
-  |    |     from each bucket                |
-  |    |                                     |
-  |    |-- REMOVE FROM LEXICAL               |
-  |    |   removeMemory(lexical, chunkId,    |
-  |    |               chunkText)            |
-  |    |     decrements postings, corpus TF  |
-  |    |                                     |
-  |    |-- FREE ID                           |
-  |    |   freeId(chunkId)                   |
-  |    |     push onto freelist (linked list |
-  |    |     stored in fingerprint bytes 0-7)|
-  |    |     zero graph node                 |
-  |    |                                     |
-  |    +-- DELETE MAPPING                    |
-  |       del chunkToParent[chunkId]         |
-  +--------------------+---------------------+
-                       |
-                       ▼
-  +------------------------------------------+
-  | 3. CLEAN PARENT                          |
-  |    del textCache[id]                     |
-  |    del timestampCache[id]                |
-  |    syncHeader() --> write recordCount +  |
-  |                     freelistHead to disk |
-  +--------------------+---------------------+
-                       |
-                       ▼
-              OUTPUT: id (now reusable)
-```
-
-**Storage:** Flat memory-mapped files with 256-byte headers (`ADLN` magic). Slots are dense indices (0, 1, 2…) rather than byte offsets. Pre-allocated 64 MiB chunks minimize remap frequency.
+## Storage Map
 
 | File | Purpose |
 |------|---------|
 | `wal.bin` | Append-only text + metadata |
 | `fingerprints.bin` | Fingerprint store (header + 1280-byte slots) |
 | `graph.bin` | HNSW node store (header + 1032-byte slots) |
-| `chunks.bin` | Parent→chunk mappings |
+| `chunks.bin` | Parent-to-chunk mappings |
 | `lsh.bin` | Persisted LSH index (checkpoint) |
 | `lexical.bin` | Persisted lexical postings (checkpoint) |
 | `corpus.bin` | Persisted corpus stats (checkpoint) |
 
 ---
 
-## Quick start
+## Quick Start
 
 ```bash
 # Build
@@ -360,23 +85,19 @@ nimble build_release
 # Stats
 ./adaline stats
 
-# Tests
-nimble test
-
 # Benchmarks
 nimble benchmark
 ./benchmarks/beir scifact
 ./benchmarks/beir nfcorpus
 ./benchmarks/beir arguana
 ./benchmarks/longmemeval
-./benchmarks/crud scifact 1000 1000
 ```
 
 ---
 
 ## Benchmarks
 
-Apple MacBook Air M2 (16 GB). Full tables and methodology in [`BENCHMARK.md`](BENCHMARK.md).
+*Tested on Apple MacBook Air M2 (16 GB). Full methodology in `BENCHMARK.md`.*
 
 | Dataset | Corpus | Indexing | Query (top-100) | nDCG@10 | R@5 |
 |---------|--------|----------|-----------------|---------|-----|
@@ -385,33 +106,69 @@ Apple MacBook Air M2 (16 GB). Full tables and methodology in [`BENCHMARK.md`](BE
 | ArguAna | 8,674 docs | 3,724 docs/s | 43 q/s | 0.226 | — |
 | LongMemEval-S | 500 questions | — | — | — | 93.6% |
 
-SciFact: Recall@1 = 43.5%, MRR = 0.55. P50 latency ~4.5 ms for top-100.
-NFCorpus: Precision@1 = 38.7%, MRR = 0.47. Hard medical retrieval task with sparse labels.
-ArguAna: Recall@1 = 0%, MRR = 0.16. Adversarial counter-argument retrieval; semantic similarity cannot distinguish opposing stances.
-LongMemEval-S: R@1 = 76.8%, R@5 = 93.6%. Conversational memory retrieval.
+**Performance Notes:**
+* **SciFact:** Recall@1 = 43.5%, MRR = 0.55. P50 latency ~4.5 ms for top-100.
+* **NFCorpus:** Precision@1 = 38.7%, MRR = 0.47. (Hard medical retrieval task with sparse labels).
+* **ArguAna:** Recall@1 = 0%, MRR = 0.16. (Adversarial counter-argument retrieval; semantic similarity struggles to distinguish opposing stances).
+* **LongMemEval-S:** R@1 = 76.8%, R@5 = 93.6%. (Conversational memory retrieval).
 
 ---
 
-## Configuration
-
-`domain/entities/config.nim`:
+## Configuration (`domain/entities/config.nim`)
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `fingerprintBytes` | 1280 | Fingerprint size (10240 bits) |
+| `fingerprintBytes` | 1280 | Fingerprint size (10,240 bits) |
 | `tokenWeight` | 0.50 | Jaccard weight for token block |
 | `bigramWeight` | 0.25 | Jaccard weight for char-bigram block |
 | `contextWeight` | 0.25 | Jaccard weight for XOR-context block |
 | `lshBands` / `lshRows` | 50 / 2 | Fingerprint LSH banding |
-| `hnswMaxLayers` | 8 | HNSW layer count |
+| `hnswMaxLayers` | 8 | Maximum HNSW layers |
 | `hnswMaxNeighbors` | 32 | Max edges per layer |
 | `hnswEfConstruction` | 200 | HNSW build beam width |
 | `hnswEfSearch` | 64 | HNSW query beam width |
 | `dirichletMu` | 2000.0 | QLM smoothing parameter |
-| `rrfK` | 10 | RRF constant |
+| `rrfK` | 10 | Reciprocal Rank Fusion constant |
 | `rerankCoverageWeight` | 0.5 | Term-coverage boost weight |
-| `chunkSaturationThreshold` | 0.6 | Chunk when any block exceeds this saturation |
+| `chunkSaturationThreshold` | 0.6 | Chunk trigger limit for block saturation |
 
 ---
 
+## Extended Multimodal Architecture
 
+While Adaline is optimized for text retrieval, its underlying storage and indexing are agnostic to data type. At its core, the engine is a memory-mapped database for 10,240-bit sparse arrays. With three structural modifications, it can index and query multimodal data such as images and signals using the same storage layout.
+
+### 1. Universal Payload Header
+
+The 256-byte self-describing header currently tracks text metadata. A single-byte **Schema Flag** (`TEXT`, `VISION`, or `SIGNAL`) is added to dictate which encoding pipeline and retrieval lanes are activated for a given slot.
+
+### 2. Pluggable Binarization Encoders
+
+The text encoder (token, character-bigram, and XOR-context) is replaced by domain-specific binarizers that compress continuous data into Adaline's native 10,240-bit format.
+
+* **Vision:** A dense floating-point vector from an edge model (e.g., MobileNet) is mapped into a sparse fingerprint via **Convolutional Sketching (CSK)**.
+* **Signal:** Frequency data (FFT or spectrogram) is reduced via **Winner-Take-All (KWTA)** thresholding. Only dominant peaks are flipped to active bits, suppressing background noise.
+
+Because fingerprints are flat 1,280-byte slots, image and signal fingerprints occupy the exact same memory-mapped blocks as text. No schema migration is required.
+
+### 3. Lexical Bypass
+
+When a query is flagged as `VISION` or `SIGNAL`, the retrieval highway is altered dynamically:
+
+* The **Lexical Lane** (inverted index and Dirichlet smoothing) is bypassed, as images and signals contain no indexable vocabulary.
+* The **Semantic Lane** assumes full control. The fingerprint is sliced into the standard 50 LSH bands. LSH buckets yield candidate seeds, which are dropped into the HNSW graph. The engine executes its standard greedy beam search, scoring similarity with the same hardware-level Jaccard math used for text.
+
+---
+
+### Multimodal Classification and Detection
+
+Storing images and signals in the HNSW graph enables machine learning tasks directly on the index without separate training pipelines.
+
+**Few-Shot Classification**
+Adaline uses K-Nearest Neighbor logic on the graph. If a user inserts five encoded images of a new object class, subsequent queries classify live inputs by neighbor majority vote in milliseconds.
+
+**Anomaly Detection**
+Because similarity is computed via strict Jaccard (intersection over union) rather than probabilistic scores, the system has a rigid mathematical threshold for familiarity. If the highest Jaccard score of the nearest neighbors falls below a configurable threshold (e.g., 35%), the input is flagged as a **novel anomaly**.
+
+**Sensor Fusion (Cross-Modal Memory)**
+Text, images, and signals all resolve to the same 1,280-byte slot format and can coexist in the same memory-mapped files. A single parent ID can map to text (a manual), an image (a machine photo), and a signal (a vibration sample). This allows edge devices to cross-reference multiple data types simultaneously without leaving local storage.
