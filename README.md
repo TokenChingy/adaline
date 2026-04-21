@@ -16,18 +16,97 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
 
 ## System Workflows
 
-### 1. Insert & Indexing
-Takes a text string, writes it to the Write-Ahead Log (WAL), and indexes it across all routing lanes. 
+### 1. Insert & Indexing (Text)
+
+```
+  Text Input
+      |
+      v
+  +--------+     +------------------+
+  | allocId|---->| wal.bin (append) |
+  +--------+     +------------------+
+      |
+      v
+  +------------------+
+  | Dynamic Chunking |----> chunks.bin (parent->chunk mapping)
+  +------------------+
+      |
+      v
+  +------------------+
+  | SDR Encoder      |----> 10,240-bit fingerprint
+  | (tokens/bigrams/ |      per chunk
+  |  XOR-context)    |
+  +------------------+
+      |
+      +------------------+------------------+
+      |                  |                  |
+      v                  v                  v
+  +--------+      +------------+      +-------------+
+  | LSH    |      | HNSW Graph |      | Lexical     |
+  | (80    |      | (layered   |      | Index (QLM  |
+  |  bands)|      |  greedy)   |      | + Dirichlet)|
+  +--------+      +------------+      +-------------+
+      |                  |                  |
+      v                  v                  v
+  lsh.bin          graph.bin          lexical.bin
+```
 
 1. **Allocate & Log:** `allocId()` fetches a slot from the freelist. The record `(memoryId, timestamp, textLen, text)` is appended to `wal.bin` and flushed instantly.
 2. **Dynamic Chunking:** The engine estimates saturation for the token, character-bigram, and XOR-context blocks. If any block hits the `chunkSaturationThreshold` (60%), the text is split on sentence boundaries with a one-sentence overlap.
-3. **Encoding:** Each chunk is encoded into a 10,240-bit fingerprint. Probe counts are scaled by IDF-squared (rare tokens get more probes; stopwords get fewer). 
+3. **Encoding:** Each chunk is encoded into a 10,240-bit fingerprint. Probe counts are scaled by IDF-squared (rare tokens get more probes; stopwords get fewer).
 4. **LSH Routing (Semantic):** The fingerprint is partitioned into 80 bands of 2 rows for GoldFinger-style direct banding, inserting the chunk into the `lsh.bin` buckets.
 5. **HNSW Routing (Semantic):** The chunk descends the `graph.bin` layers via greedy best-first search, wiring bidirectional edges pruned by weighted Jaccard distance.
 6. **Lexical Routing:** Text is tokenized on non-alphanumeric boundaries and added to the inverted index using Query Likelihood with Dirichlet smoothing ($\mu = 2000$).
 
-### 2. Search & Retrieval
-Executes a parallel query across both lanes, merges the candidates, and isolates the highest-relevance parents.
+### 2. Search & Retrieval (Text)
+
+```
+  Query Text
+      |
+      v
+  +------------------+
+  | SDR Encoder      |
+  | (probe mul 2.0)  |
+  +------------------+
+      |
+      +----------+----------+
+      |          |          |
+      v          v          v
+  +--------+ +--------+ +--------+
+  | LSH    | | HNSW   | | Lexical|
+  | Seeds  | | Layer0 | | Index  |
+  +--------+ +--------+ +--------+
+      |          |          |
+      v          v          v
+  +--------+ +--------+ +--------+
+  | Weighted| | Beam   | | QLM    |
+  | Jaccard | | Search | | Score  |
+  +--------+ +--------+ +--------+
+      |          |          |
+      +----------+----------+
+                 |
+                 v
+          +------------+
+          | RRF Merger |
+          | (k=10)     |
+          +------------+
+                 |
+                 v
+          +------------+
+          | Chunk ->   |
+          | Parent     |
+          | Resolution |
+          +------------+
+                 |
+                 v
+          +------------+
+          | Term-Cov   |
+          | Rerank     |
+          +------------+
+                 |
+                 v
+           Results[]
+```
 
 1. **Query Encoding:** The query is encoded with a `queryProbeMultiplier` of 2.0 to compensate for the sparsity of short queries.
 2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. These seeds are dropped into Layer 0 of the HNSW graph, triggering a beam search (`efSearch=64`). Candidates are scored using Weighted Jaccard.
@@ -35,18 +114,150 @@ Executes a parallel query across both lanes, merges the candidates, and isolates
 4. **Fusion & Resolution:** Both lanes are merged using Reciprocal Rank Fusion (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
 5. **Rerank:** Top candidates receive a final term-coverage boost (`+ 0.5 * coverage`) to push exact matches to the top of the result list.
 
-### 3. Update
+### 3. Update (Text)
+
+```
+  Update Request (id, newText)
+      |
+      v
+  +--------+     +------------------+
+  | Delete |---->| Heal old chunks  |
+  | old    |     | (HNSW + LSH +    |
+  | chunks |     |  lexical purge)  |
+  +--------+     +------------------+
+      |
+      v
+  +--------+     +------------------+
+  | Insert |---->| WAL append +     |
+  | new    |     | full re-index    |
+  | chunks |     | (same as Insert) |
+  +--------+     +------------------+
+      |
+      v
+  Same parent ID, fresh chunks
+```
+
 Performs a logical atomic delete-then-insert. It calls the Delete workflow to wipe the old chunks and heal the graph, then appends a new WAL record and re-inserts the updated content, seamlessly mapping the fresh chunks back to the original parent ID.
 
-### 4. Delete
-Physically removes a memory from every index and heals the surrounding data structures.
+### 4. Delete (Text)
+
+```
+  Delete Request (parentId)
+      |
+      v
+  +------------------+
+  | Collect chunkIds |
+  | from chunks.bin  |
+  +------------------+
+      |
+      v
+  +------------------+
+  | Heal Graph       |----> Reverse edge index
+  | (sever fwd/bwd)  |      heals neighbor lists
+  +------------------+
+      |
+      v
+  +------------------+
+  | Purge Indexes    |----> Remove from LSH buckets
+  +------------------+      Decrement lexical postings
+      |
+      v
+  +------------------+
+  | freeId()         |----> Zero fingerprint
+  +------------------+      Clear HNSW node
+      |                     Push to freelist
+      v
+   syncHeader()
+```
 
 1. **Collect:** Identify all chunk IDs associated with the target parent ID.
 2. **Heal Graph:** For each chunk, sever forward edges and backward edges. An in-memory reverse edge index is used to remove the chunk from all predecessors' neighbor lists without a full graph rebuild.
 3. **Purge Indexes:** Remove the chunk from the LSH buckets and decrement its term frequencies from the lexical postings.
 4. **Free ID:** Zero out the graph node and push the slot back to the `mmap` freelist.
 
-### 5. Checkpoint & Restart
+### 5. Vision / Dense-Vector Insert
+
+```
+  Float32 Vector (e.g. 1280-dim CNN features)
+      |
+      v
+  +------------------+
+  | Dense Encoder    |
+  | (k-WTA, 128      |----> Top-k dims by |value|
+  |  winners)        |      probed via hashFeature
+  +------------------+
+      |
+      v
+  +------------------+
+  | 10,240-bit       |      Same fingerprint format
+  | Fingerprint      |      as text SDR
+  +------------------+
+      |
+      +----------+----------+
+      |          |          |
+      v          v          v
+  +--------+ +--------+  (no lexical
+  | LSH    | | HNSW   |   index for
+  | Insert | | Insert |   dense vectors)
+  +--------+ +--------+
+      |          |
+      v          v
+  lsh.bin   graph.bin
+```
+
+Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` use-case encodes a float32 vector directly to a fingerprint and inserts into LSH and HNSW.
+
+### 6. Vision / Dense-Vector Search
+
+```
+  Query Vector (float32)
+      |
+      v
+  +------------------+
+  | Dense Encoder    |
+  | (same k-WTA)     |
+  +------------------+
+      |
+      v
+  +------------------+
+  | 10,240-bit       |
+  | Query Fingerprint|
+  +------------------+
+      |
+      v
+  +--------+     +--------+
+  | LSH    |---->| HNSW   |
+  | Seeds  |     | Layer0 |
+  +--------+     +--------+
+      |              |
+      v              v
+  +------------------------+
+  | Weighted Jaccard Score |
+  +------------------------+
+      |
+      v
+   Results[]
+```
+
+The `searchDense` use-case encodes the query vector to a fingerprint and searches LSH + HNSW. No lexical lane, no RRF, no reranker — pure semantic similarity.
+
+### 7. Checkpoint & Restart
+
+```
+  checkpoint()
+      |
+      +----------+----------+----------+
+      |          |          |          |
+      v          v          v          v
+  +--------+ +--------+ +--------+ +--------+
+  | LSH    | | Lexical| | Corpus | | WAL    |
+  | Buckets| | Postings| | IDF   | | Offset |
+  +--------+ +--------+ +--------+ +--------+
+      |          |          |          |
+      v          v          v          v
+  lsh.bin   lexical.bin  corpus.bin  (header)
+```
+
 `checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to disk, embedding the current WAL offset. On restart, Adaline loads the persisted indexes, replays only the un-checkpointed WAL tail, and rebuilds the HNSW reverse edge index in memory.
 
 ---
