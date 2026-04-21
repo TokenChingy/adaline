@@ -137,6 +137,55 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 | MAP | 0.5521 |
 | nDCG@10 | 0.5891 |
 
+### `fix/no-graph-weyl-sparse` (this branch)
+
+Hardware: WSL2 Linux, 4 cores, 8 GB RAM (x86_64). Not directly comparable to M2 numbers above.
+
+This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint delete fix, Weyl-sequence probes, sparser defaults (token 4→3, bigram 2→1, context 2→1), and the `hnswEnabled` toggle.
+
+#### With HNSW (default, `hnswEnabled=true`)
+
+| Statistic | Value |
+|-----------|-------|
+| Total insert time | 59.12 s |
+| Insert throughput | 87.68 docs/s |
+| Insert P50 | 9.22 ms |
+| Insert P95 | 24.02 ms |
+| Query throughput | 104.00 q/s |
+| Query P50 | 9.32 ms |
+| Recall@1 | 45.17% |
+| Recall@5 | 66.33% |
+| Recall@10 | 71.50% |
+| Recall@100 | 89.89% |
+| nDCG@10 | 0.5878 |
+
+#### No-graph (`hnswEnabled=false`, brute-force exact Jaccard)
+
+| Statistic | Value |
+|-----------|-------|
+| Total insert time | 3.92 s |
+| Insert throughput | **1322.94 docs/s** |
+| Insert P50 | 0.65 ms |
+| Insert P95 | 1.41 ms |
+| Query throughput | 48.86 q/s |
+| Query P50 | 19.65 ms |
+| Recall@1 | 46.50% |
+| Recall@5 | 66.61% |
+| Recall@10 | **74.07%** |
+| Recall@100 | 89.62% |
+| nDCG@10 | **0.6018** |
+
+#### Comparison
+
+| Mode | Insert (docs/s) | Query (q/s) | nDCG@10 | R@10 |
+|------|----------------|-------------|---------|------|
+| Baseline (master) | 2,465 | 222 | 0.5796 | 72.57% |
+| `fix/combined-bugs` | 32.8 | 45.7 | 0.5891 | 71.42% |
+| **This branch (HNSW)** | **87.7** | **104.0** | **0.5878** | **71.50%** |
+| **This branch (no-graph)** | **1323** | **48.9** | **0.6018** | **74.07%** |
+
+> The baseline (master) numbers are from Apple M2 and not directly comparable. The key comparison is between `fix/combined-bugs` and this branch on the same hardware. The no-graph mode is **15× faster at insertion** than this branch's HNSW mode, **2.7× faster than `fix/combined-bugs`**, and gives the **highest nDCG@10 (0.6018)** of any configuration tested.
+
 ### Ablation Breakdown (SciFact)
 
 | Branch | Lane | R@1 | R@5 | R@10 | R@100 | nDCG@10 |
