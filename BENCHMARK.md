@@ -181,7 +181,7 @@ This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint de
 |------|----------------|-------------|---------|------|
 | Baseline (master) | 2,465 | 222 | 0.5796 | 72.57% |
 | `fix/combined-bugs` | 32.8 | 45.7 | 0.5891 | 71.42% |
-| **This branch (HNSW, M=16, efC=50)** | **273.7** | **120.2** | **0.5609** | **70.61%** |
+| **This branch (HNSW, M=8, efC=50)** | **436.1** | **127.7** | **0.5649** | **70.61%** |
 | **This branch (no-graph)** | **1323** | **48.9** | **0.6018** | **74.07%** |
 
 > The baseline (master) numbers are from Apple M2 and not directly comparable. The key comparison is between `fix/combined-bugs` and this branch on the same hardware. The no-graph mode is **15× faster at insertion** than this branch's HNSW mode, **2.7× faster than `fix/combined-bugs`**, and gives the **highest nDCG@10 (0.6018)** of any configuration tested.

@@ -69,7 +69,7 @@ proc defaultEngineConfig*(): EngineConfig =
     lshBands: 80,
     lshRows: 2,
     hnswMaxLayers: 8,
-    hnswMaxNeighbors: 16,
+    hnswMaxNeighbors: 8,
     hnswEfConstruction: 50,
     hnswEfSearch: 64,
     dirichletMu: 2000.0,
