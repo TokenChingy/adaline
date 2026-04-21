@@ -99,6 +99,11 @@ python3 benchmarks/benchmark.py --dataset cifar10 --benchmark all
 # With compiled Adaline Engine (nimble python required)
 python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
 
+# Nim benchmark using insertDense / searchDense use-cases
+python3 benchmarks/dump_features.py
+nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
+./benchmarks/vision_bench benchmarks/data/cifar10_features.bin
+
 # CRUD throughput
 nim c -d:release -o:benchmarks/crud benchmarks/crud.nim
 ./benchmarks/crud scifact 1000 1000

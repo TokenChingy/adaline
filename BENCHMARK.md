@@ -206,6 +206,14 @@ python3 benchmarks/benchmark.py --dataset cifar10 --benchmark all
 python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
 ```
 
+Or run the Nim benchmark directly (uses `insertDense` / `searchDense` use-cases):
+
+```bash
+python3 benchmarks/dump_features.py
+nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
+./benchmarks/vision_bench benchmarks/data/cifar10_features.bin
+```
+
 ### Results
 
 #### Footprint
@@ -219,7 +227,7 @@ python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
 | Method | Accuracy | ms/query |
 |--------|----------|----------|
 | dense (cosine) | **44.4%** | 0.018 |
-| sparse (HNSW) | 42.2% | 0.216 |
+| sparse (HNSW) | 42.2% | 0.163 |
 
 #### Few-Shot Scaling (accuracy vs prototypes/class)
 
@@ -233,13 +241,13 @@ python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
 
 #### Incremental Class Addition (5 prototypes/class)
 
-| Classes | dense | sparse (HNSW) |
-|---------|-------|---------------|
-| 2 | 88.0% | 89.0% |
-| 4 | 78.5% | 68.5% |
-| 6 | 57.3% | 68.3% |
-| 8 | 54.5% | 58.5% |
-| 10 | 52.8% | 50.2% |
+| Classes | dense | sparse (HNSW) | ms/query |
+|---------|-------|---------------|----------|
+| 2 | 88.0% | 89.0% | 0.149 |
+| 4 | 78.5% | 68.5% | 0.161 |
+| 6 | 57.3% | 68.3% | 0.182 |
+| 8 | 54.5% | 58.5% | 0.202 |
+| 10 | 52.8% | 50.2% | 0.217 |
 
 #### Open-Set Detection (6 known classes, query all 10)
 
@@ -260,7 +268,8 @@ python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
    the similarity score separates known from novel inputs better than random
    chance, though less cleanly than on synthetic structured data.
 4. **Query latency scales gracefully.** At 10 classes × 5 prototypes = 50
-   items, sparse retrieval averages ~0.3 ms/query through the full HNSW engine.
+   items, sparse retrieval averages ~0.16–0.22 ms/query through the full HNSW engine.
+   The `vision_bench` binary exercises the actual `insertDense` / `searchDense` use-cases.
 5. **`--engine` bridges Python and Nim.** The same Python benchmark suite can
    now exercise the actual compiled HNSW+LSH index, giving O(log N) search
    instead of brute-force Jaccard while keeping the PyTorch feature-extraction

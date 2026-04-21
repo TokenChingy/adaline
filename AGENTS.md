@@ -36,7 +36,8 @@ domain/services/    <- Pure domain orchestration. Each operation lives in
                        services when needed.
 bindings/           <- Python bindings (nimpy) exposing the same use cases.
 benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark,
-                       Python vision suite.
+                       Python vision suite, `vision_bench.nim` (Nim dense-vector
+                       benchmark using insertDense / searchDense use-cases).
 tests/              <- Unit tests mirroring the folder layout.
 adaline.nim         <- The CLI entry point.
 ```
