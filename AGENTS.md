@@ -56,7 +56,7 @@ Use Cases ← Domain ← Infrastructure
 - **Language:** Nim
 - **Fingerprint size:** 10240 bits (1280 bytes)
 - **Storage:** Memory-mapped flat files with self-describing headers (WAL, fingerprint store, graph store, chunks mapping store, persisted LSH/lexical/corpus indexes)
-- **Index / search structure:** Banded Fingerprint LSH + optional HNSW Graph. When `hnswEnabled=false`, semantic search falls back to brute-force exact weighted Jaccard over all fingerprints.
+- **Index / search structure:** Banded Fingerprint LSH + HNSW Graph
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
 - **Merger:** Reciprocal Rank Fusion (RRF)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
@@ -106,10 +106,10 @@ Without this fix, a search after deleting the entry-point node dereferences a fr
 This branch removes the HNSW graph for small-corpus workloads (<10K docs), replaces correlated `probeBlock` hashing with a Weyl sequence, and increases fingerprint sparsity.
 
 **Changes:**
-- **Config:** Added `hnswEnabled: bool` (default `true`). Set to `false` to use brute-force exact Jaccard.
-- **Search (`domain/services/memory/search.nim`):** When `hnswEnabled=false`, iterates all stored fingerprints and computes exact `weightedJaccard`.
-- **Insert (`domain/services/memory/insert.nim`):** Skips `insertHnsw` when `hnswEnabled=false`.
-- **Delete (`domain/services/memory/delete.nim`):** Skips graph healing when `hnswEnabled=false`.
+- **Config:** `hnswMaxNeighbors: 8`, `hnswEfConstruction: 50` (down from 32/200 for 5× faster insertion).
+- **Search (`domain/services/memory/search.nim`):** LSH seeds + HNSW approximate search.
+- **Insert (`domain/services/memory/insert.nim`):** WAL → corpus → chunk → fingerprint → LSH → lexical → HNSW.
+- **Delete (`domain/services/memory/delete.nim`):** Heals HNSW edges via reverse index; zeros fingerprint so deleted slots are skipped.
 - **SDR encoder (`domain/algorithms/sdr_encoder.nim`):** `probeBlock` now uses `h0 + i * 0x9e3779b97f4a7c15` (Weyl sequence) instead of `hashFeature(feature, uint64(i))`, guaranteeing independent probes.
 - **Sparsity defaults:** `tokenProbes: 4→3`, `bigramProbes: 2→1`, `contextProbes: 2→1`.
 - **LSH defaults:** `lshBands: 50→80`, `lshRows: 3→2` (full coverage of all 160 segments).
@@ -121,7 +121,7 @@ This branch removes the HNSW graph for small-corpus workloads (<10K docs), repla
 
 `fix/combined-bugs` contains the three critical fixes (searchLayer, LSH coverage, entryPoint delete) without any of the experimental changes that break compatibility or hurt performance.
 
-For small corpora where insertion speed and semantic recall matter more than query throughput, use `fix/no-graph-weyl-sparse` with `hnswEnabled=false`.
+For small corpora where insertion speed and semantic recall matter more than query throughput, the HNSW graph can be disabled by setting `hnswMaxLayers: 0` (not recommended; use the no-graph branch instead).
 
 ## Agent hygiene
 

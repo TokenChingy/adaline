@@ -3,11 +3,9 @@ import ../../entities/memory
 import ../../algorithms/sdr_encoder
 import ../../algorithms/fingerprint_lsh
 import ../../algorithms/hnsw_graph
-import ../../algorithms/weighted_jaccard
 import ../../algorithms/lexical_index
 import ../../algorithms/rrf_merger
 import ../../algorithms/reranker
-import ../../../infrastructure/mmapped_storage
 import std/[tables, algorithm]
 
 export types
@@ -15,32 +13,13 @@ export memory
 
 proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   let qfp = encodeSdr(query, service.cfg, service.corpus, isQuery = true)
-  # Semantic lane: brute-force exact Jaccard or HNSW approximate search
+  # Semantic lane: LSH seeds + HNSW approximate search
   var semanticResults = newSeq[tuple[memoryId: uint64, score: float]]()
   if service.cfg.semanticSearchEnabled:
-    if service.cfg.hnswEnabled:
-      let lshSeeds = queryLsh(service.lsh, addr qfp)
-      if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
-        semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
-                                     lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
-    else:
-      # Brute-force exact weighted Jaccard over all stored fingerprints
-      var scored = newSeq[tuple[score: float, id: uint64]]()
-      let n = service.storage.idCount()
-      for i in 1'u64 ..< n:
-        let fp = service.storage.getFingerprintPtr(i)
-        let s = weightedJaccard(addr qfp, fp, service.cfg)
-        if s > 0.0:
-          scored.add((s, i))
-      scored.sort(proc(a, b: tuple[score: float, id: uint64]): int =
-        if a.score > b.score: return -1
-        if a.score < b.score: return 1
-        return 0
-      )
-      let limit = min(k, scored.len)
-      semanticResults = newSeq[tuple[memoryId: uint64, score: float]](limit)
-      for i in 0 ..< limit:
-        semanticResults[i] = (scored[i].id, scored[i].score)
+    let lshSeeds = queryLsh(service.lsh, addr qfp)
+    if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
+      semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
+                                   lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
 
   # Lexical lane at chunk level
   var lexicalResults = newSeq[tuple[memoryId: uint64, score: float]]()

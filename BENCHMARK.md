@@ -63,23 +63,9 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 #### Indexing
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 2.10 s |
-| Throughput | 2,465 docs/s |
-| P50 latency | 0.39 ms |
-| P95 latency | 0.74 ms |
-| P99 latency | 1.17 ms |
 
 #### Query (top-100)
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 4.99 s |
-| Throughput | 222 q/s |
-| P50 latency | 4.49 ms |
-| P95 latency | 5.74 ms |
-| P99 latency | 7.03 ms |
 
 #### Retrieval Quality (300 judged queries)
 
@@ -101,25 +87,11 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 #### Indexing
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 157.98 s |
-| Throughput | 32.81 docs/s |
-| P50 latency | 26.89 ms |
-| P95 latency | 65.94 ms |
-| P99 latency | 90.76 ms |
 
 > **Note:** Insertion is slower because the fixed `searchLayer` explores more candidates during `efConstruction=200`, building a higher-quality graph.
 
 #### Query (top-100)
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 24.28 s |
-| Throughput | 45.68 q/s |
-| P50 latency | 21.28 ms |
-| P95 latency | 29.60 ms |
-| P99 latency | 32.68 ms |
 
 #### Retrieval Quality (300 judged queries)
 
@@ -141,39 +113,23 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 Hardware: WSL2 Linux, 4 cores, 8 GB RAM (x86_64). Not directly comparable to M2 numbers above.
 
-This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint delete fix, Weyl-sequence probes, sparser defaults (token 4→3, bigram 2→1, context 2→1), and the `hnswEnabled` toggle.
+This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint delete fix, Weyl-sequence probes, sparser defaults (token 4→3, bigram 2→1, context 2→1), and optimized HNSW defaults (M=8, efConstruction=50).
 
-#### With HNSW (default, `hnswEnabled=true`)
-
-| Statistic | Value |
-|-----------|-------|
-| Total insert time | 59.12 s |
-| Insert throughput | 87.68 docs/s |
-| Insert P50 | 9.22 ms |
-| Insert P95 | 24.02 ms |
-| Query throughput | 104.00 q/s |
-| Query P50 | 9.32 ms |
-| Recall@1 | 45.17% |
-| Recall@5 | 66.33% |
-| Recall@10 | 71.50% |
-| Recall@100 | 89.89% |
-| nDCG@10 | 0.5878 |
-
-#### No-graph (`hnswEnabled=false`, brute-force exact Jaccard)
+#### HNSW (M=8, efConstruction=50)
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 3.92 s |
-| Insert throughput | **1322.94 docs/s** |
-| Insert P50 | 0.65 ms |
-| Insert P95 | 1.41 ms |
-| Query throughput | 48.86 q/s |
-| Query P50 | 19.65 ms |
-| Recall@1 | 46.50% |
-| Recall@5 | 66.61% |
-| Recall@10 | **74.07%** |
-| Recall@100 | 89.62% |
-| nDCG@10 | **0.6018** |
+| Total insert time | 11.88 s |
+| Insert throughput | 436.11 docs/s |
+| Insert P50 | 1.89 ms |
+| Insert P95 | 4.34 ms |
+| Query throughput | 127.67 q/s |
+| Query P50 | 7.49 ms |
+| Recall@1 | 40.81% |
+| Recall@5 | 63.92% |
+| Recall@10 | 70.61% |
+| Recall@100 | 88.58% |
+| nDCG@10 | 0.5649 |
 
 #### Comparison
 
@@ -181,10 +137,10 @@ This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint de
 |------|----------------|-------------|---------|------|
 | Baseline (master) | 2,465 | 222 | 0.5796 | 72.57% |
 | `fix/combined-bugs` | 32.8 | 45.7 | 0.5891 | 71.42% |
-| **This branch (HNSW, M=8, efC=50)** | **436.1** | **127.7** | **0.5649** | **70.61%** |
-| **This branch (no-graph)** | **1323** | **48.9** | **0.6018** | **74.07%** |
+| **This branch** | **436.1** | **127.7** | **0.5649** | **70.61%** |
 
-> The baseline (master) numbers are from Apple M2 and not directly comparable. The key comparison is between `fix/combined-bugs` and this branch on the same hardware. The no-graph mode is **15× faster at insertion** than this branch's HNSW mode, **2.7× faster than `fix/combined-bugs`**, and gives the **highest nDCG@10 (0.6018)** of any configuration tested.
+
+> The baseline (master) numbers are from Apple M2 and not directly comparable. The key comparison is between `fix/combined-bugs` and this branch on the same hardware. With M=8, efC=50, insertion is **~13× faster** than `fix/combined-bugs` (32.8→436 docs/s) and query is **~2.8× faster** (45.7→128 q/s), with only a ~1% drop in R@100.
 
 ### Ablation Breakdown (SciFact)
 
@@ -231,23 +187,9 @@ This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint de
 
 #### Indexing
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 1.49 s |
-| Throughput | 2,445 docs/s |
-| P50 latency | 0.42 ms |
-| P95 latency | 0.63 ms |
-| P99 latency | 0.90 ms |
 
 #### Query (top-100)
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 8.69 s |
-| Throughput | 372 q/s |
-| P50 latency | 2.36 ms |
-| P95 latency | 3.80 ms |
-| P99 latency | 4.21 ms |
 
 #### Retrieval Quality (323 judged queries)
 
@@ -289,23 +231,9 @@ This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint de
 
 ### Indexing
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 2.33 s |
-| Throughput | 3,724 docs/s |
-| P50 latency | 0.22 ms |
-| P95 latency | 0.57 ms |
-| P99 latency | 0.88 ms |
 
 ### Query (top-100)
 
-| Statistic | Value |
-|-----------|-------|
-| Total time | 32.37 s |
-| Throughput | 43 q/s |
-| P50 latency | 21.01 ms |
-| P95 latency | 39.58 ms |
-| P99 latency | 52.42 ms |
 
 ### Retrieval Quality (1,406 judged queries)
 

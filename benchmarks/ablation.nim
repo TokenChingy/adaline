@@ -167,10 +167,6 @@ proc runMode*(datasetName, mode: string): Table[string, seq[string]] =
   of "combined":
     cfg.semanticSearchEnabled = true
     cfg.lexicalSearchEnabled = true
-  of "nograph":
-    cfg.semanticSearchEnabled = true
-    cfg.lexicalSearchEnabled = true
-    cfg.hnswEnabled = false
   else:
     raise newException(ValueError, "Unknown mode: " & mode)
 

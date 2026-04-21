@@ -50,7 +50,6 @@ type
     # Ablation flags for benchmarking individual lanes
     semanticSearchEnabled*: bool
     lexicalSearchEnabled*: bool
-    hnswEnabled*: bool
 
 proc defaultEngineConfig*(): EngineConfig =
   result = EngineConfig(
@@ -79,5 +78,4 @@ proc defaultEngineConfig*(): EngineConfig =
     queryProbeMultiplier: 2.0,
     semanticSearchEnabled: true,
     lexicalSearchEnabled: true,
-    hnswEnabled: true,
   )

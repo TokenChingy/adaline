@@ -145,28 +145,3 @@ suite "Memory service":
     let results2 = svc.search("nim", 5)
     check results2.len > 0
     check results2[0].id == id3
-
-  test "brute-force search works when hnsw is disabled":
-    var noGraphCfg = defaultEngineConfig()
-    noGraphCfg.hnswEnabled = false
-    var svc = initMemoryService(testDir, noGraphCfg)
-    let id1 = svc.insert("the quick brown fox")
-    let id2 = svc.insert("lazy dog sleeping")
-    let id3 = svc.insert("nim programming language")
-
-    let results = svc.search("quick fox", 5)
-    check results.len > 0
-    check results[0].id == id1
-
-    let results2 = svc.search("nim", 5)
-    check results2.len > 0
-    check results2[0].id == id3
-
-    svc.deleteMemory(id2)
-
-    let results3 = svc.search("lazy dog", 5)
-    var foundDeleted = false
-    for r in results3:
-      if r.id == id2:
-        foundDeleted = true
-    check not foundDeleted
