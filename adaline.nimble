@@ -21,6 +21,7 @@ task python, "Build Python bindings":
 task benchmark, "Compile benchmarks in release mode":
   exec "nim c -d:release -o:benchmarks/beir benchmarks/beir.nim"
   exec "nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim"
+  exec "nim c -d:release -o:benchmarks/vision benchmarks/vision.nim"
 
 task test, "Compile and run all tests":
   for f in @[
