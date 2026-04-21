@@ -15,13 +15,16 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   let qfp = encodeSdr(query, service.cfg, service.corpus, isQuery = true)
   # Semantic lane: LSH seeds + HNSW approximate search
   var semanticResults = newSeq[tuple[memoryId: uint64, score: float]]()
-  let lshSeeds = queryLsh(service.lsh, addr qfp)
-  if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
-    semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
-                                 lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
+  if service.cfg.semanticSearchEnabled:
+    let lshSeeds = queryLsh(service.lsh, addr qfp)
+    if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
+      semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
+                                   lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
 
   # Lexical lane at chunk level
-  var lexicalResults = searchLexical(service.lexical, query, k)
+  var lexicalResults = newSeq[tuple[memoryId: uint64, score: float]]()
+  if service.cfg.lexicalSearchEnabled:
+    lexicalResults = searchLexical(service.lexical, query, k)
 
   # RRF merge at chunk level
   let merged = mergeRrf(semanticResults, lexicalResults, k, service.cfg.rrfK)

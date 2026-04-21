@@ -47,6 +47,10 @@ type
     # Multiplier for query probes (makes query fingerprints denser)
     queryProbeMultiplier*: float
 
+    # Ablation flags for benchmarking individual lanes
+    semanticSearchEnabled*: bool
+    lexicalSearchEnabled*: bool
+
 proc defaultEngineConfig*(): EngineConfig =
   result = EngineConfig(
     fingerprintBytes: 1280,
@@ -72,4 +76,6 @@ proc defaultEngineConfig*(): EngineConfig =
     rerankCoverageWeight: 0.5,
     chunkSaturationThreshold: 0.6,
     queryProbeMultiplier: 2.0,
+    semanticSearchEnabled: true,
+    lexicalSearchEnabled: true,
   )
