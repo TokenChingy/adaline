@@ -1,7 +1,7 @@
-# Engine configuration entity.
-# Defines all tunable parameters: fingerprint dimensions, SDR probe
-# counts, HNSW graph structure, LSH banding, lexical smoothing,
-# RRF constants, chunking thresholds, and query-time multipliers.
+## Engine configuration entity.
+## Defines all tunable parameters: fingerprint dimensions, SDR probe
+## counts, HNSW graph structure, LSH banding, lexical smoothing,
+## RRF constants, chunking thresholds, and query-time multipliers.
 
 
 type

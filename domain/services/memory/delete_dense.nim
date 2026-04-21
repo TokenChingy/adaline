@@ -1,6 +1,6 @@
-# Dense-vector delete service.
-# Removes a dense-only vector from LSH and HNSW, heals graph edges,
-# and frees the slot.  Guards against deleting text memories or chunks.
+## Dense-vector delete service.
+## Removes a dense-only vector from LSH and HNSW, heals graph edges,
+## and frees the slot.  Guards against deleting text memories or chunks.
 
 
 import ./types

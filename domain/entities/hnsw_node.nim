@@ -1,7 +1,7 @@
-# HNSW node entity.
-# Defines the in-memory layout of an HNSW graph node: layer count,
-# neighbor count per layer, and a flat neighbor ID array.
-# Sized to 1,032 bytes for dense slot addressing.
+## HNSW node entity.
+## Defines the in-memory layout of an HNSW graph node: layer count,
+## neighbor count per layer, and a flat neighbor ID array.
+## Sized to 1,032 bytes for dense slot addressing.
 
 
 const

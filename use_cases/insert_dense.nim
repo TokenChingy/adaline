@@ -1,6 +1,6 @@
-# Insert dense-vector use case.
-# Input/output port for inserting a dense float32 vector.
-# Delegates to the domain insert_dense service.
+## Insert dense-vector use case.
+## Input/output port for inserting a dense float32 vector.
+## Delegates to the domain insert_dense service.
 
 
 import ../domain/services/memory/insert_dense

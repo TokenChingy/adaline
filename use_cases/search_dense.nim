@@ -1,6 +1,6 @@
-# Search dense-vector use case.
-# Input/output port for searching by dense float32 vector.
-# Delegates to the domain search_dense service.
+## Search dense-vector use case.
+## Input/output port for searching by dense float32 vector.
+## Delegates to the domain search_dense service.
 
 
 import ../domain/services/memory/search_dense

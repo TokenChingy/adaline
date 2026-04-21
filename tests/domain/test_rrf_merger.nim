@@ -1,4 +1,4 @@
-# Unit tests for RRF merger algorithm.
+## Unit tests for RRF merger algorithm.
 
 
 import unittest

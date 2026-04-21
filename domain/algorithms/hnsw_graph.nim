@@ -1,7 +1,7 @@
-# Hierarchical Navigable Small World (HNSW) graph.
-# Construction, greedy best-first search, and neighbor selection
-# for sparse fingerprint vectors using weighted Jaccard distance.
-# Includes layer assignment, edge wiring, and graph healing on delete.
+## Hierarchical Navigable Small World (HNSW) graph.
+## Construction, greedy best-first search, and neighbor selection
+## for sparse fingerprint vectors using weighted Jaccard distance.
+## Includes layer assignment, edge wiring, and graph healing on delete.
 
 
 import ../entities/fingerprint

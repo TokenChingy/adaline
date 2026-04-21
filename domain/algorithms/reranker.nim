@@ -1,6 +1,6 @@
-# Term-coverage reranker.
-# Boosts merged candidates by the fraction of query tokens that appear
-# in the candidate text, pushing exact lexical matches toward the top.
+## Term-coverage reranker.
+## Boosts merged candidates by the fraction of query tokens that appear
+## in the candidate text, pushing exact lexical matches toward the top.
 
 
 import ../entities/memory

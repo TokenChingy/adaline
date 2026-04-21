@@ -1,5 +1,5 @@
-# Dense-vector search service.
-# Encodes a query vector to a fingerprint and searches LSH + HNSW.
+## Dense-vector search service.
+## Encodes a query vector to a fingerprint and searches LSH + HNSW.
 
 
 import ./types

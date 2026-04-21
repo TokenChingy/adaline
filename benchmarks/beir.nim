@@ -1,7 +1,7 @@
-# BEIR benchmark runner.
-# Downloads, indexes, and queries BEIR datasets (SciFact, NFCorpus,
-# ArguAna, MS MARCO). Reports insert throughput, query latency,
-# and retrieval quality metrics (Recall, Precision, MRR, MAP, nDCG).
+## BEIR benchmark runner.
+## Downloads, indexes, and queries BEIR datasets (SciFact, NFCorpus,
+## ArguAna, MS MARCO). Reports insert throughput, query latency,
+## and retrieval quality metrics (Recall, Precision, MRR, MAP, nDCG).
 
 
 import std/[os, strutils, json, times, tables, sets, sequtils, algorithm, math]

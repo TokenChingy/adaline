@@ -1,6 +1,6 @@
-# Lexical inverted index with Query Likelihood Model.
-# Tokenizes text on non-alphanumeric boundaries, builds postings lists,
-# and scores queries using QLM with Dirichlet smoothing.
+## Lexical inverted index with Query Likelihood Model.
+## Tokenizes text on non-alphanumeric boundaries, builds postings lists,
+## and scores queries using QLM with Dirichlet smoothing.
 
 
 import std/[tables, strutils, math, algorithm]

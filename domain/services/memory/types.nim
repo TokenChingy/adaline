@@ -1,6 +1,6 @@
-# Memory service types.
-# Defines the MemoryService object that holds references to all
-# memory-mapped stores and in-memory indexes.
+## Memory service types.
+## Defines the MemoryService object that holds references to all
+## memory-mapped stores and in-memory indexes.
 
 
 import ../../entities/config

@@ -1,6 +1,6 @@
-# Reciprocal Rank Fusion (RRF) merger.
-# Combines semantic and lexical lane result lists by summing
-# reciprocal ranks, then deduplicates by parent memory ID.
+## Reciprocal Rank Fusion (RRF) merger.
+## Combines semantic and lexical lane result lists by summing
+## reciprocal ranks, then deduplicates by parent memory ID.
 
 
 import std/[tables, algorithm]

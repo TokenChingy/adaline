@@ -1,6 +1,6 @@
-# Memory service initialisation.
-# Creates or opens the memory-mapped storage (WAL, fingerprint store,
-# graph store, chunks store) and replays WAL and chunk mappings.
+## Memory service initialisation.
+## Creates or opens the memory-mapped storage (WAL, fingerprint store,
+## graph store, chunks store) and replays WAL and chunk mappings.
 
 
 import ./types

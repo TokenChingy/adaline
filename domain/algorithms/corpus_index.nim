@@ -1,6 +1,6 @@
-# Corpus-wide term frequency index.
-# Tracks document frequencies across the entire corpus to compute
-# IDF-squared scaling for SDR probe counts.
+## Corpus-wide term frequency index.
+## Tracks document frequencies across the entire corpus to compute
+## IDF-squared scaling for SDR probe counts.
 
 
 import std/[tables, sets, strutils, math]

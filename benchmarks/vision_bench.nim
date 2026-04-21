@@ -1,7 +1,7 @@
-# Vision / dense-vector benchmark using the proper dense-vector use-cases.
-# Loads CIFAR-10 CNN features from benchmarks/data/cifar10_features.bin
-# and benchmarks classification, few-shot scaling, incremental class addition,
-# and open-set detection via insertDense / searchDense.
+## Vision / dense-vector benchmark using the proper dense-vector use-cases.
+## Loads CIFAR-10 CNN features from benchmarks/data/cifar10_features.bin
+## and benchmarks classification, few-shot scaling, incremental class addition,
+## and open-set detection via insertDense / searchDense.
 
 import std/[os, strutils, times, math, random, bitops]
 import ../domain/services/memory/types

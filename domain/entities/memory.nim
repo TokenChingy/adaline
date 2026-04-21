@@ -1,6 +1,6 @@
-# Memory entity.
-# Represents a stored memory with ID, content, relevance score,
-# and timestamp.
+## Memory entity.
+## Represents a stored memory with ID, content, relevance score,
+## and timestamp.
 
 
 type

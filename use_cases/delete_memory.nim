@@ -1,6 +1,6 @@
-# Delete memory use case.
-# Input/output port for deleting a memory by ID.
-# Delegates to the domain delete service.
+## Delete memory use case.
+## Input/output port for deleting a memory by ID.
+## Delegates to the domain delete service.
 
 
 import ../domain/services/memory/delete

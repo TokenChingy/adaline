@@ -1,4 +1,4 @@
-# Unit tests for Fingerprint LSH algorithm.
+## Unit tests for Fingerprint LSH algorithm.
 
 
 import unittest

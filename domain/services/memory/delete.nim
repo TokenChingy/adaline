@@ -1,7 +1,7 @@
-# Delete memory service.
-# Physically removes a memory and all its chunks from every index.
-# Heals HNSW neighbor lists via an in-memory reverse edge index
-# without tombstones or full graph rebuilds.
+## Delete memory service.
+## Physically removes a memory and all its chunks from every index.
+## Heals HNSW neighbor lists via an in-memory reverse edge index
+## without tombstones or full graph rebuilds.
 
 
 import ./types

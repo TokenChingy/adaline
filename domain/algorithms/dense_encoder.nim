@@ -1,8 +1,8 @@
-# Dense float32 vector to sparse fingerprint encoder.
-# Uses k-Winners Take All (k-WTA): top-k dimensions by absolute value
-# are treated as active features and probed into the fingerprint space
-# using the same hashFeature/probeBlock primitives as the text SDR encoder.
-# Enables vision, audio, and tabular data to use identical infrastructure.
+## Dense float32 vector to sparse fingerprint encoder.
+## Uses k-Winners Take All (k-WTA): top-k dimensions by absolute value
+## are treated as active features and probed into the fingerprint space
+## using the same hashFeature/probeBlock primitives as the text SDR encoder.
+## Enables vision, audio, and tabular data to use identical infrastructure.
 
 
 import ../entities/fingerprint

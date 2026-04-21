@@ -1,7 +1,7 @@
-# Insert memory service.
-# Orchestrates the full insert pipeline: WAL append, chunking,
-# SDR encoding, LSH indexing, lexical indexing, and HNSW graph
-# insertion with layer assignment and neighbor wiring.
+## Insert memory service.
+## Orchestrates the full insert pipeline: WAL append, chunking,
+## SDR encoding, LSH indexing, lexical indexing, and HNSW graph
+## insertion with layer assignment and neighbor wiring.
 
 
 import ./types

@@ -1,7 +1,7 @@
-# Search memory service.
-# Runs parallel semantic (LSH → HNSW) and lexical (inverted index)
-# lanes, merges results via RRF, resolves chunks to parents,
-# and applies term-coverage reranking.
+## Search memory service.
+## Runs parallel semantic (LSH → HNSW) and lexical (inverted index)
+## lanes, merges results via RRF, resolves chunks to parents,
+## and applies term-coverage reranking.
 
 
 import ./types

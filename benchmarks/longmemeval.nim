@@ -1,6 +1,6 @@
-# LongMemEval-S benchmark runner.
-# Evaluates conversational memory retrieval over ~500 questions
-# with multi-session context. Measures R@1, R@5, R@10 per category.
+## LongMemEval-S benchmark runner.
+## Evaluates conversational memory retrieval over ~500 questions
+## with multi-session context. Measures R@1, R@5, R@10 per category.
 
 
 import std/[os, strutils, json, tables, algorithm]

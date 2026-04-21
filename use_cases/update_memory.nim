@@ -1,6 +1,6 @@
-# Update memory use case.
-# Input/output port for updating an existing memory by ID.
-# Delegates to the domain update service.
+## Update memory use case.
+## Input/output port for updating an existing memory by ID.
+## Delegates to the domain update service.
 
 
 import ../domain/services/memory/update

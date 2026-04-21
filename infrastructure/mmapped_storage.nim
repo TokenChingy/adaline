@@ -1,8 +1,8 @@
-# Memory-mapped storage adapter.
-# Manages WAL, fingerprint store, graph store, and chunk mapping
-# store as contiguous memory-mapped flat files with 256-byte
-# self-describing headers. Provides dense slot addressing,
-# freelist-based ID reuse, and 64 MiB pre-allocated growth.
+## Memory-mapped storage adapter.
+## Manages WAL, fingerprint store, graph store, and chunk mapping
+## store as contiguous memory-mapped flat files with 256-byte
+## self-describing headers. Provides dense slot addressing,
+## freelist-based ID reuse, and 64 MiB pre-allocated growth.
 
 
 import ../domain/entities/fingerprint

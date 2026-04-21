@@ -1,6 +1,6 @@
-# Python bindings for Adaline.
-# Exposes Engine (insert, search, update, delete, stats, checkpoint)
-# via nimpy so Adaline can be used from Python.
+## Python bindings for Adaline.
+## Exposes Engine (insert, search, update, delete, stats, checkpoint)
+## via nimpy so Adaline can be used from Python.
 
 
 import nimpy
@@ -44,7 +44,7 @@ proc delete*(self: Engine; memoryId: uint64) {.exportpy.} =
 proc checkpoint*(self: Engine) {.exportpy.} =
   checkpoint(self.service)
 
-# ─── Dense-vector API (vision / signal / tabular) ────────────────────────────
+## ─── Dense-vector API (vision / signal / tabular) ────────────────────────────
 
 proc insertDense*(self: Engine; vec: seq[float32]): uint64 {.exportpy.} =
   let output = insertDense(self.service, InsertDenseInput(vec: vec))

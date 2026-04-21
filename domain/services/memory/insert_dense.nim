@@ -1,7 +1,7 @@
-# Dense-vector insert service.
-# Bypasses text chunking, SDR encoding, and lexical indexing.
-# Encodes a float32 vector directly to a fingerprint and inserts
-# into LSH and HNSW.
+## Dense-vector insert service.
+## Bypasses text chunking, SDR encoding, and lexical indexing.
+## Encodes a float32 vector directly to a fingerprint and inserts
+## into LSH and HNSW.
 
 
 import ./types

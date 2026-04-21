@@ -1,7 +1,7 @@
-# Sentence-aware conditional chunker.
-# Splits long text into multiple chunks when any fingerprint block
-# (tokens, bigrams, or XOR-context) approaches saturation.
-# Splits on sentence boundaries with one-sentence overlap.
+## Sentence-aware conditional chunker.
+## Splits long text into multiple chunks when any fingerprint block
+## (tokens, bigrams, or XOR-context) approaches saturation.
+## Splits on sentence boundaries with one-sentence overlap.
 
 
 import ../entities/config

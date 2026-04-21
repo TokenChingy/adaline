@@ -1,8 +1,8 @@
-# Sparse Distributed Representation (SDR) encoder.
-# Converts text into a 10,240-bit fingerprint using three blocks:
-# tokens (50% weight), character-bigrams (25% weight), and
-# XOR-context features (25% weight). Probe counts are scaled by
-# IDF-squared so rare terms receive more active bits.
+## Sparse Distributed Representation (SDR) encoder.
+## Converts text into a 10,240-bit fingerprint using three blocks:
+## tokens (50% weight), character-bigrams (25% weight), and
+## XOR-context features (25% weight). Probe counts are scaled by
+## IDF-squared so rare terms receive more active bits.
 
 
 import ../entities/fingerprint

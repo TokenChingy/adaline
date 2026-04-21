@@ -1,7 +1,7 @@
-# Banded Fingerprint LSH (GoldFinger-style).
-# Partitions the 10,240-bit fingerprint into bands and rows for
-# locality-sensitive hashing. Each band hash seeds candidate retrieval
-# into the HNSW graph layer 0.
+## Banded Fingerprint LSH (GoldFinger-style).
+## Partitions the 10,240-bit fingerprint into bands and rows for
+## locality-sensitive hashing. Each band hash seeds candidate retrieval
+## into the HNSW graph layer 0.
 
 
 import ../entities/fingerprint

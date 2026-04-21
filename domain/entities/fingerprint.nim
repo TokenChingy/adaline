@@ -1,7 +1,7 @@
-# Fingerprint entity.
-# A fixed-size 10,240-bit (1,280-byte) bitmap representing a sparse
-# distributed representation. Provides bit-level get/set operations
-# and population count.
+## Fingerprint entity.
+## A fixed-size 10,240-bit (1,280-byte) bitmap representing a sparse
+## distributed representation. Provides bit-level get/set operations
+## and population count.
 
 
 import std/bitops

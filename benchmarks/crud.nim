@@ -1,6 +1,6 @@
-# CRUD throughput benchmark.
-# Measures insert, delete, and update throughput on a BEIR corpus,
-# then runs a post-CRUD query sanity check.
+## CRUD throughput benchmark.
+## Measures insert, delete, and update throughput on a BEIR corpus,
+## then runs a post-CRUD query sanity check.
 
 
 import std/[os, strutils, json, times, tables, sequtils, algorithm]

@@ -1,6 +1,6 @@
-# Checkpoint service.
-# Serializes in-memory indexes (LSH buckets, lexical postings,
-# corpus IDF tables) to disk so startup can skip full WAL replay.
+## Checkpoint service.
+## Serializes in-memory indexes (LSH buckets, lexical postings,
+## corpus IDF tables) to disk so startup can skip full WAL replay.
 
 
 import ./types

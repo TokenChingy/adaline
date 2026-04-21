@@ -1,4 +1,4 @@
-# Unit tests for LexicalIndex algorithm.
+## Unit tests for LexicalIndex algorithm.
 
 
 import unittest

@@ -126,6 +126,26 @@ This branch includes the three critical fixes (searchLayer, LSH coverage, entryP
 
 For small corpora where insertion speed and semantic recall matter more than query throughput, the HNSW graph can be disabled by setting `hnswMaxLayers: 0`.
 
+## Comment Style
+
+All documentation **must** use Nim doc comments (`## `):
+
+- **Module-level docs:** every `.nim` file starts with a `## ` block describing its purpose.
+- **Proc-level docs:** exported procs are preceded by a `## ` block explaining inputs, outputs, and behaviour.
+- **No regular `#` comments** for documentation. Use `#` only for inline explanations of non-obvious logic (and keep them minimal).
+- **One `#` per line.** Never use `###`, `####`, or other multi-hash decorative styles.
+
+Example:
+```nim
+## Dense-vector insert service.
+## Bypasses text chunking and lexical indexing.
+## Encodes a float32 vector directly to a fingerprint and inserts
+## into LSH and HNSW.
+
+proc insertDense*(service: var MemoryService; vec: seq[float32]): uint64 =
+  ...
+```
+
 ## Agent hygiene
 
 Before finishing any task:

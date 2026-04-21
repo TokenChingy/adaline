@@ -1,7 +1,7 @@
-# Update memory service.
-# Performs a logical atomic delete-then-insert: heals the old
-# chunks out of the graph, then re-inserts updated content and
-# maps fresh chunks back to the original parent ID.
+## Update memory service.
+## Performs a logical atomic delete-then-insert: heals the old
+## chunks out of the graph, then re-inserts updated content and
+## maps fresh chunks back to the original parent ID.
 
 
 import ./types

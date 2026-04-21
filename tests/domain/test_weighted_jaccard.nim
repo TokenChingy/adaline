@@ -1,4 +1,4 @@
-# Unit tests for Weighted Jaccard algorithm.
+## Unit tests for Weighted Jaccard algorithm.
 
 
 import unittest

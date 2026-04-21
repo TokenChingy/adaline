@@ -1,6 +1,6 @@
-# Adaline CLI entry point.
-# Provides command-line interface for insert, search, update, delete,
-# and stats operations against a memory-mapped fingerprint store.
+## Adaline CLI entry point.
+## Provides command-line interface for insert, search, update, delete,
+## and stats operations against a memory-mapped fingerprint store.
 
 
 import std/[os, strutils, tables, times]
