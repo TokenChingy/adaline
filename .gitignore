@@ -29,8 +29,9 @@ build/
 .DS_Store
 Thumbs.db
 
-# Benchmark data
+# Benchmark data and caches (large files, never commit)
 benchmarks/data/*
+benchmarks/cache/*
 benchmarks/scifact.zip
 benchmarks/nfcorpus.zip
 benchmarks/arguana.zip
