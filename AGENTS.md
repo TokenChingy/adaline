@@ -34,7 +34,8 @@ domain/services/    <- Pure domain orchestration. `memory_service.nim` is the um
                        graph store, chunks mapping store). Imported by domain
                        services when needed.
 bindings/           <- Python bindings (nimpy) exposing the same use cases.
-benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark.
+benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark,
+                       Vision benchmark (dense-vector -> fingerprint -> HNSW).
 tests/              <- Unit tests mirroring the folder layout.
 adaline.nim         <- The CLI entry point.
 ```

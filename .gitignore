@@ -29,7 +29,15 @@ build/
 .DS_Store
 Thumbs.db
 
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
 # Benchmark data and caches (large files, never commit)
+data/
 benchmarks/data/*
 benchmarks/cache/*
 benchmarks/scifact.zip

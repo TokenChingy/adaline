@@ -28,6 +28,31 @@ python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id
 ./benchmarks/longmemeval
 ```
 
+### Vision / Dense-Vector Retrieval (CIFAR-10)
+
+Demonstrates replacing a neural-network classification head with Adaline
+sparse-fingerprint retrieval.  Dense float32 CNN features are encoded with
+`encodeDense` (k-WTA) and indexed through the actual HNSW + LSH engine.
+
+**Generate features** (one-time Python preprocessing):
+```bash
+# Real MobileNetV2 features from CIFAR-10
+python3 benchmarks/dump_features.py
+```
+
+**Run the Nim benchmark**:
+```bash
+nimble benchmark          # compiles benchmarks/vision
+./benchmarks/vision       # uses benchmarks/data/cifar10_features.bin
+```
+
+Benchmarks included:
+1. **Footprint** — active-bit count and compression ratio vs. dense float32.
+2. **Classify** — 1-shot classification accuracy (dense cosine baseline vs. HNSW).
+3. **Fewshot** — accuracy vs. number of prototypes per class (1, 2, 5, 10, 20).
+4. **Incremental** — graceful degradation as new classes are added (2→10).
+5. **Openset** — AUROC and known-class accuracy when enrolling 6/10 classes.
+
 ### CRUD (delete + update throughput)
 
 ```bash
