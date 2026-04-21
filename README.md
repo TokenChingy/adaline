@@ -370,41 +370,52 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 
 ---
 
-## Extended Multimodal Architecture
+## Dense-Vector Pipeline
 
-While Adaline is optimized for text retrieval, its underlying storage and indexing are agnostic to data type. At its core, the engine is a memory-mapped database for 10,240-bit sparse arrays. With minimal modifications, it can index and query multimodal data such as images and signals using the same storage layout.
+Adaline can index float32 vectors (e.g. CNN embeddings, tabular features) through a parallel API that bypasses text chunking and lexical indexing. The pipeline uses the same 10,240-bit fingerprint format, LSH bands, and HNSW graph as text — only the encoder changes.
 
-### 1. Universal Payload Header
+### k-WTA Binarization
 
-The 256-byte self-describing header currently tracks text metadata. A single-byte **Schema Flag** (`TEXT`, `VISION`, or `SIGNAL`) is added to dictate which encoding pipeline and retrieval lanes are activated for a given slot.
+`domain/algorithms/dense_encoder.nim` implements **k-Winners Take All** encoding:
 
-### 2. Pluggable Binarization Encoders
+1. Input: an L2-normalised float32 vector.
+2. Select the top-k dimensions by absolute value (default k = 128).
+3. Hash each winning dimension via `hashFeature` to generate probes.
+4. Flip the corresponding bits in a 10,240-bit fingerprint using the same `probeBlock` primitive as the text SDR encoder.
 
-The text encoder (token, character-bigram, and XOR-context) is replaced by domain-specific binarizers that compress continuous data into Adaline's native 10,240-bit format.
+The resulting fingerprint is structurally identical to a text fingerprint and is stored in the same `fingerprints.bin` slot format.
 
-* **Vision:** A dense floating-point vector from an edge model (e.g., MobileNet) is mapped into a sparse fingerprint via **k-Winners Take All (k-WTA)** encoding (`domain/algorithms/dense_encoder.nim`). The top-k dimensions by absolute value are treated as active features and probed into the fingerprint space using the same `hashFeature`/`probeBlock` primitives as the text SDR encoder.
-* **Signal:** Frequency data (FFT or spectrogram) is reduced via **Winner-Take-All (KWTA)** thresholding. Only dominant peaks are flipped to active bits, suppressing background noise.
+### API
 
-Because fingerprints are flat 1,280-byte slots, image and signal fingerprints occupy the exact same memory-mapped blocks as text. No schema migration is required.
+```nim
+# Nim
+let id = insertDense(service, InsertDenseInput(vec: features))
+let results = searchDense(service, SearchDenseInput(vec: queryFeatures, topK: 10))
+deleteDense(service, DeleteDenseInput(memoryId: id))
+```
 
-### 3. Lexical Bypass
+```python
+# Python (nimble python)
+id = eng.insertDense(features)
+results = eng.searchDense(query_features, topK=10)
+eng.deleteDense(id)
+```
 
-When a query is flagged as `VISION` or `SIGNAL`, the retrieval highway is altered dynamically:
+* Dense-vector insert populates **only** LSH and HNSW — no WAL entry, no lexical posting, no chunk mapping.
+* Dense-vector search queries **only** LSH + HNSW — no lexical lane, no RRF, no reranker.
+* Dense-vector delete removes the slot from LSH and heals HNSW edges via the reverse index, same as text delete.
 
-* The **Lexical Lane** (inverted index and Dirichlet smoothing) is bypassed, as images and signals contain no indexable vocabulary.
-* The **Semantic Lane** assumes full control. The fingerprint is sliced into the standard 80 LSH bands. LSH buckets yield candidate seeds, which are dropped into the HNSW graph. The engine executes its standard greedy beam search, scoring similarity with the same hardware-level Jaccard math used for text.
+There is no schema flag or runtime dispatch. Text and dense vectors are managed through separate, explicit APIs (`insert` vs `insertDense`). They share the underlying storage and graph but are not interchangeable at the entity level.
 
----
+### Vision Benchmark
 
-### Multimodal Classification and Detection
+`benchmarks/vision_bench.nim` runs CIFAR-10 classification using MobileNetV2 features extracted via `benchmarks/dump_features.py`:
 
-Storing images and signals in the HNSW graph enables machine learning tasks directly on the index without separate training pipelines.
+| Task | Dense Cosine | Sparse HNSW |
+|------|-------------|-------------|
+| 1-shot classify | 44.4% | 42.2% |
+| 20-shot classify | 62.6% | 61.8% |
+| Open-set AUROC | — | 0.578 |
+| Query latency | — | ~0.22 ms |
 
-**Few-Shot Classification**
-Adaline uses K-Nearest Neighbor logic on the graph. If a user inserts five encoded images of a new object class, subsequent queries classify live inputs by neighbor majority vote in milliseconds.
-
-**Anomaly Detection**
-Because similarity is computed via strict Jaccard (intersection over union) rather than probabilistic scores, the system has a rigid mathematical threshold for familiarity. If the highest Jaccard score of the nearest neighbors falls below a configurable threshold (e.g., 35%), the input is flagged as a **novel anomaly**.
-
-**Sensor Fusion (Cross-Modal Memory)**
-Text, images, and signals all resolve to the same 1,280-byte slot format and can coexist in the same memory-mapped files. A single parent ID can map to text (a manual), an image (a machine photo), and a signal (a vibration sample). This allows edge devices to cross-reference multiple data types simultaneously without leaving local storage.
+The sparse pipeline is competitive with dense cosine similarity while operating on 1,280-byte fingerprints instead of full float32 vectors.
