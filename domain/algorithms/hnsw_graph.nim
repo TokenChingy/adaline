@@ -35,7 +35,7 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
 
   while candidates.len > 0:
     let curr = candidates.pop()
-    if results.len > 0 and curr.dist > -results[0].negDist:
+    if results.len >= ef and curr.dist > -results[0].negDist:
       break
 
     results.push((-curr.dist, curr.id))

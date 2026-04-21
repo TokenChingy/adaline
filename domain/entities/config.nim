@@ -50,6 +50,7 @@ type
     # Ablation flags for benchmarking individual lanes
     semanticSearchEnabled*: bool
     lexicalSearchEnabled*: bool
+    hnswEnabled*: bool
 
 proc defaultEngineConfig*(): EngineConfig =
   result = EngineConfig(
@@ -61,11 +62,11 @@ proc defaultEngineConfig*(): EngineConfig =
     tokenWeight: 0.50,
     bigramWeight: 0.25,
     contextWeight: 0.25,
-    tokenProbes: 4,
+    tokenProbes: 3,
     tokenBigramProbes: 2,
-    bigramProbes: 2,
-    contextProbes: 2,
-    lshBands: 50,
+    bigramProbes: 1,
+    contextProbes: 1,
+    lshBands: 80,
     lshRows: 2,
     hnswMaxLayers: 8,
     hnswMaxNeighbors: 32,
@@ -78,4 +79,5 @@ proc defaultEngineConfig*(): EngineConfig =
     queryProbeMultiplier: 2.0,
     semanticSearchEnabled: true,
     lexicalSearchEnabled: true,
+    hnswEnabled: true,
   )

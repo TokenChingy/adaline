@@ -26,23 +26,36 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
     chunkIds.add(parentId)
 
   for chunkId in chunkIds:
-    # Heal HNSW graph: remove chunkId from all neighbor lists that reference it
-    let node = service.storage.getHnswNodePtr(chunkId)
-    if node.layerCount > 0:
-      # Forward edges: for each neighbor N of chunkId, remove chunkId from reverse[N]
-      for lc in 0 ..< int(node.layerCount):
-        for nid in node.neighbors(lc):
-          if service.hnswReverseIndex.hasKey(nid):
-            service.hnswReverseIndex[nid] = service.hnswReverseIndex[nid].filterIt(it != chunkId)
+    if service.cfg.hnswEnabled:
+      # Heal HNSW graph: remove chunkId from all neighbor lists that reference it
+      let node = service.storage.getHnswNodePtr(chunkId)
+      if node.layerCount > 0:
+        # Forward edges: for each neighbor N of chunkId, remove chunkId from reverse[N]
+        for lc in 0 ..< int(node.layerCount):
+          for nid in node.neighbors(lc):
+            if service.hnswReverseIndex.hasKey(nid):
+              service.hnswReverseIndex[nid] = service.hnswReverseIndex[nid].filterIt(it != chunkId)
 
-      # Backward edges: for each node M that points to chunkId, remove chunkId from M's list
-      if service.hnswReverseIndex.hasKey(chunkId):
-        for mid in service.hnswReverseIndex[chunkId]:
-          let mnode = service.storage.getHnswNodePtr(mid)
-          if mnode.layerCount > 0:
-            for lc in 0 ..< int(mnode.layerCount):
-              discard removeNeighbor(mnode, lc, chunkId)
-        service.hnswReverseIndex.del(chunkId)
+        # Backward edges: for each node M that points to chunkId, remove chunkId from M's list
+        if service.hnswReverseIndex.hasKey(chunkId):
+          for mid in service.hnswReverseIndex[chunkId]:
+            let mnode = service.storage.getHnswNodePtr(mid)
+            if mnode.layerCount > 0:
+              for lc in 0 ..< int(mnode.layerCount):
+                discard removeNeighbor(mnode, lc, chunkId)
+          service.hnswReverseIndex.del(chunkId)
+
+      # If deleted chunk was entry point, find new one
+      if service.hnswEntryPoint == chunkId:
+        var newEp: uint64 = 0
+        var newMaxLayer = -1
+        for i in 1'u64 ..< service.storage.idCount():
+          let n = service.storage.getHnswNodePtr(i)
+          if n.layerCount > 0 and int(n.entryLayer) > newMaxLayer:
+            newMaxLayer = int(n.entryLayer)
+            newEp = i
+        service.hnswEntryPoint = newEp
+        service.maxHnswLayer = newMaxLayer
 
     # Remove from LSH (needs fingerprint before freeing slot)
     let fpPtr = service.storage.getFingerprintPtr(chunkId)

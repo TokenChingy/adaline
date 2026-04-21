@@ -18,8 +18,9 @@ proc hashFeature*(feature: string; seed: uint64 = 0): uint64 =
   result = h
 
 proc probeBlock*(fp: var Fingerprint; feature: string; count, baseBit, sizeBits: int) =
+  let h0 = hashFeature(feature, 0)
   for i in 0 ..< count:
-    let h = hashFeature(feature, uint64(i))
+    let h = h0 + uint64(i) * 0x9e3779b97f4a7c15'u64
     let pos = int(h mod uint64(sizeBits)) + baseBit
     setBit(fp, pos)
 

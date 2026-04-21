@@ -56,7 +56,7 @@ Use Cases ← Domain ← Infrastructure
 - **Language:** Nim
 - **Fingerprint size:** 10240 bits (1280 bytes)
 - **Storage:** Memory-mapped flat files with self-describing headers (WAL, fingerprint store, graph store, chunks mapping store, persisted LSH/lexical/corpus indexes)
-- **Index / search structure:** Banded Fingerprint LSH + HNSW Graph
+- **Index / search structure:** Banded Fingerprint LSH + optional HNSW Graph. When `hnswEnabled=false`, semantic search falls back to brute-force exact weighted Jaccard over all fingerprints.
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
 - **Merger:** Reciprocal Rank Fusion (RRF)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
@@ -97,13 +97,31 @@ Without this fix, a search after deleting the entry-point node dereferences a fr
 
 | Experiment | Branch | Result |
 |------------|--------|--------|
-| **Weyl-sequence probes** | `exp/hash-weyl-fixed` | Marginal combined nDCG@10 gain (+0.005 over `combined-bugs`), but changes fingerprint generation (breaks existing indexes). |
+| **Weyl-sequence probes** | `exp/hash-weyl-fixed` | Marginal combined nDCG@10 gain (+0.005 over `combined-bugs`), but changes fingerprint generation (breaks existing indexes). **Adopted on `fix/no-graph-weyl-sparse`.** |
 | **Standard HNSW layer distribution (`mL = 1/ln(M)`)** | `exp/hnsw-layer-p-fixed` | **Hurts** semantic recall. The dense hierarchy (`p=0.5`) works better for sparse Jaccard fingerprints than the standard sparse hierarchy. |
 | **Diversity-aware neighbor pruning** | `exp/diversity-heuristic` | **Hurts** semantic recall and is **~10× slower** at insertion. The standard HNSW `selectNeighbors` heuristic is designed for dense Euclidean spaces; simple distance truncation is superior for sparse SDRs. |
+
+### Branch: `fix/no-graph-weyl-sparse`
+
+This branch removes the HNSW graph for small-corpus workloads (<10K docs), replaces correlated `probeBlock` hashing with a Weyl sequence, and increases fingerprint sparsity.
+
+**Changes:**
+- **Config:** Added `hnswEnabled: bool` (default `true`). Set to `false` to use brute-force exact Jaccard.
+- **Search (`domain/services/memory/search.nim`):** When `hnswEnabled=false`, iterates all stored fingerprints and computes exact `weightedJaccard`.
+- **Insert (`domain/services/memory/insert.nim`):** Skips `insertHnsw` when `hnswEnabled=false`.
+- **Delete (`domain/services/memory/delete.nim`):** Skips graph healing when `hnswEnabled=false`.
+- **SDR encoder (`domain/algorithms/sdr_encoder.nim`):** `probeBlock` now uses `h0 + i * 0x9e3779b97f4a7c15` (Weyl sequence) instead of `hashFeature(feature, uint64(i))`, guaranteeing independent probes.
+- **Sparsity defaults:** `tokenProbes: 4→3`, `bigramProbes: 2→1`, `contextProbes: 2→1`.
+- **LSH defaults:** `lshBands: 50→80`, `lshRows: 3→2` (full coverage of all 160 segments).
+- **Storage (`infrastructure/mmapped_storage.nim`):** `freeId` zeros the fingerprint so brute-force search skips deleted slots.
+
+**Trade-off:** Brute-force is **~43× faster at insertion** and gives **~8 points higher semantic R@100** on SciFact, but query throughput drops from ~46 q/s to ~30 q/s. For <10K docs this is the superior choice.
 
 ### Recommended branch
 
 `fix/combined-bugs` contains the three critical fixes (searchLayer, LSH coverage, entryPoint delete) without any of the experimental changes that break compatibility or hurt performance.
+
+For small corpora where insertion speed and semantic recall matter more than query throughput, use `fix/no-graph-weyl-sparse` with `hnswEnabled=false`.
 
 ## Agent hygiene
 

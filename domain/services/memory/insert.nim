@@ -39,9 +39,10 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
     addMemory(service.lexical, chunkId, content)
 
-    insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-               service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-               service.hnswReverseIndex)
+    if service.cfg.hnswEnabled:
+      insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
+                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+                 service.hnswReverseIndex)
   else:
     # Chunked: create multiple indexable units
     for chunkText in chunks:
@@ -56,8 +57,9 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
       addMemory(service.lexical, chunkId, chunkText)
 
-      insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-                 service.hnswReverseIndex)
+      if service.cfg.hnswEnabled:
+        insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
+                   service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+                   service.hnswReverseIndex)
 
   result = parentId

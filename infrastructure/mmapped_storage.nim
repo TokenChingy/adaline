@@ -337,6 +337,10 @@ proc allocId*(storage: MmappedStorage): uint64 =
 
 proc freeId*(storage: MmappedStorage; id: uint64) =
   ## Return a slot to the freelist.
+  let fpPtr = storage.getFingerprintPtr(id)
+  # Zero the fingerprint so brute-force search skips deleted slots
+  zeroMem(fpPtr, FingerprintBytes)
+  # Link into freelist (first 8 bytes of the zeroed fingerprint)
   let nextPtr = cast[ptr uint64](cast[pointer](
     cast[uint](storage.fpMem) + uint(id * uint64(FingerprintBytes))))
   nextPtr[] = storage.freelistHead

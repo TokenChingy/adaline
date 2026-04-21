@@ -149,7 +149,7 @@ proc computePrecision(results: Table[string, seq[string]], qrels: Table[string, 
     scores.add(float(found) / float(topK.len))
   return mean(scores)
 
-proc runBenchmark*(datasetName: string) =
+proc runBenchmark*(datasetName, mode: string) =
   ensureDataset(datasetName)
   let dataDir = datasetDir(datasetName)
   let corpus = loadCorpus(dataDir)
@@ -161,8 +161,10 @@ proc runBenchmark*(datasetName: string) =
   echo "  Queries:  ", queries.len
   echo "  Qrels:    ", qrels.len
 
-  let cfg = defaultEngineConfig()
-  let benchDir = getCurrentDir() / "benchmarks" / "data" / datasetName
+  var cfg = defaultEngineConfig()
+  if mode == "nograph":
+    cfg.hnswEnabled = false
+  let benchDir = getCurrentDir() / "benchmarks" / "data" / (datasetName & "_" & mode)
   removeDir(benchDir)
   var service = initMemoryService(benchDir, cfg)
 
@@ -245,12 +247,13 @@ Examples:
 proc main() =
   let args = commandLineParams()
   let datasetName = if args.len > 0: args[0] else: DefaultDataset
+  let mode = if args.len > 1: args[1] else: "graph"
 
   if datasetName in ["help", "--help", "-h"]:
     printUsage()
     return
 
-  runBenchmark(datasetName)
+  runBenchmark(datasetName, mode)
 
 when isMainModule:
   main()
