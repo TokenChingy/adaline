@@ -94,38 +94,53 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       var oldNeighbors = newSeq[uint64]()
       for nnid in nnode.neighbors(lc):
         oldNeighbors.add(nnid)
-      oldNeighbors.add(memoryId)
 
-      var scored = newSeq[tuple[dist: float, id: uint64]]()
-      for nnid in oldNeighbors:
-        let nnptr = getFingerprintPtr(fpMem, nnid)
-        let d = 1.0 - weightedJaccard(getFingerprintPtr(fpMem, nid), nnptr, cfg)
-        scored.add((d, nnid))
+      # Fast neighbor update: compute distance to new node only,
+      # then compare against worst existing neighbor. Avoids
+      # recomputing distances for all old neighbors.
+      let newDist = 1.0 - weightedJaccard(
+        getFingerprintPtr(fpMem, nid),
+        getFingerprintPtr(fpMem, memoryId), cfg)
 
-      scored.sort(proc(a, b: auto): int =
-        if a.dist < b.dist: return -1
-        if a.dist > b.dist: return 1
-        return 0
-      )
+      if oldNeighbors.len < cfg.hnswMaxNeighbors:
+        oldNeighbors.add(memoryId)
+        setNeighbors(nnode, lc, oldNeighbors)
+        # New edge nid → memoryId; add nid to reverse[memoryId]
+        var list = reverseIndex.mgetOrPut(memoryId, @[])
+        if nid notin list:
+          list.add(nid)
+          reverseIndex[memoryId] = list
+        continue
 
-      var kept = newSeq[uint64]()
-      for i in 0 ..< min(scored.len, cfg.hnswMaxNeighbors):
-        kept.add(scored[i].id)
-      setNeighbors(nnode, lc, kept)
+      # Find worst existing neighbor (largest distance = smallest Jaccard)
+      var worstDist = newDist
+      var worstIdx = -1
+      for i, nnid in oldNeighbors:
+        let d = 1.0 - weightedJaccard(
+          getFingerprintPtr(fpMem, nid),
+          getFingerprintPtr(fpMem, nnid), cfg)
+        if d > worstDist:
+          worstDist = d
+          worstIdx = i
 
-      # Update reverse index for edges that were dropped or kept by nid
-      for o in oldNeighbors:
-        if o notin kept:
-          # Edge nid → o was dropped; remove nid from reverse[o]
-          if reverseIndex.hasKey(o):
-            reverseIndex[o] = reverseIndex[o].filterIt(it != nid)
-      for k in kept:
-        if k == memoryId or k notin oldNeighbors[0 ..< oldNeighbors.len - 1]:
-          # Edge nid → k is new or retained; ensure nid is in reverse[k]
-          var list = reverseIndex.mgetOrPut(k, @[])
-          if nid notin list:
-            list.add(nid)
-            reverseIndex[k] = list
+      if worstIdx >= 0:
+        # Replace worst with new node
+        let dropped = oldNeighbors[worstIdx]
+        oldNeighbors[worstIdx] = memoryId
+        setNeighbors(nnode, lc, oldNeighbors)
+        # Edge nid → dropped was removed
+        if reverseIndex.hasKey(dropped):
+          reverseIndex[dropped] = reverseIndex[dropped].filterIt(it != nid)
+        # Edge nid → memoryId is new
+        var list = reverseIndex.mgetOrPut(memoryId, @[])
+        if nid notin list:
+          list.add(nid)
+          reverseIndex[memoryId] = list
+      else:
+        # New node is worse than all existing; no change to nid's neighbors.
+        # Remove nid from reverse[memoryId] since edge nid→memoryId won't exist.
+        if reverseIndex.hasKey(memoryId):
+          reverseIndex[memoryId] = reverseIndex[memoryId].filterIt(it != nid)
 
     if neighbors.len > 0:
       currEp = neighbors[0].id
