@@ -1,3 +1,8 @@
+# Reciprocal Rank Fusion (RRF) merger.
+# Combines semantic and lexical lane result lists by summing
+# reciprocal ranks, then deduplicates by parent memory ID.
+
+
 import std/[tables, algorithm]
 
 proc mergeRrf*(semantic: seq[tuple[memoryId: uint64, score: float]];

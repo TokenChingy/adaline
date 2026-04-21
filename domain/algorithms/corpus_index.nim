@@ -1,3 +1,8 @@
+# Corpus-wide term frequency index.
+# Tracks document frequencies across the entire corpus to compute
+# IDF-squared scaling for SDR probe counts.
+
+
 import std/[tables, sets, strutils, math]
 
 type
@@ -22,7 +27,6 @@ proc addMemory*(index: var CorpusIndex; text: string) =
   for token in seen:
     index.memFreqs.mgetOrPut(token, 0).inc
 
-  # Update IDF for seen terms
   for token in seen:
     let df = index.memFreqs[token]
     let val = ln(float(index.numMemories) / float(df))
@@ -38,9 +42,6 @@ proc scaledProbes*(index: CorpusIndex; feature: string; baseProbes: int): int =
   let s = max(1.0, float(baseProbes) * (ratio * ratio))
   result = int(s)
 
-# ---------------------------------------------------------------------------
-# Serialization (flat binary)
-# ---------------------------------------------------------------------------
 
 proc saveCorpus*(index: CorpusIndex; path: string; walOffset: uint64 = 0) =
   var f = open(path, fmWrite)
@@ -85,7 +86,6 @@ proc loadCorpus*(path: string; walOffset: var uint64): CorpusIndex =
     var freq64: int64
     discard f.readBuffer(addr freq64, 8)
     result.memFreqs[term] = int(freq64)
-    # Recompute IDF
     let val = ln(float(result.numMemories) / float(freq64))
     result.idf[term] = val
   f.close()

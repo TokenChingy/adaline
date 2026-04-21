@@ -1,3 +1,6 @@
+# Unit tests for Memory entity.
+
+
 import unittest
 import ../../domain/entities/memory
 

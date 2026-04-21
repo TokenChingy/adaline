@@ -1,10 +1,9 @@
 # Adaline Benchmarks
 
-Run against BEIR datasets with the LSH → HNSW layer-0 search path and term-coverage reranking.
-
 ## Build
 
 ```bash
+nimble release
 nimble benchmark
 ```
 
@@ -21,30 +20,33 @@ nimble benchmark
 
 Datasets auto-download on first run and cache in `benchmarks/<name>/`.
 
-### Ablation Benchmark (semantic / lexical / combined)
-
-The ablation benchmark isolates each search lane:
+### CRUD (delete + update throughput)
 
 ```bash
-nim c -d:release -o:benchmarks/ablation benchmarks/ablation.nim
-./benchmarks/ablation scifact all       # run semantic, lexical, combined
-./benchmarks/ablation scifact semantic  # semantic lane only
-./benchmarks/ablation scifact lexical   # lexical lane only
-./benchmarks/ablation scifact combined  # both lanes with RRF
+nim c -d:release -o:benchmarks/crud benchmarks/crud.nim
+./benchmarks/crud scifact 1000 1000
+```
+
+### Vision / Dense-Vector (Python, requires PyTorch)
+
+```bash
+python3 benchmarks/benchmark.py --dataset cifar10 --benchmark all
+python3 benchmarks/benchmark.py --dataset imagenet --benchmark comparison --backbone resnet50
+```
+
+To also benchmark the actual compiled Adaline Engine (HNSW+LSH) via Python bindings:
+
+```bash
+nimble python
+python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
 ```
 
 ### LongMemEval
 
 ```bash
 python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='xiaowu0162/longmemeval-cleaned', filename='longmemeval_s_cleaned.json', repo_type='dataset', local_dir='benchmarks/data')"
+nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 ./benchmarks/longmemeval
-```
-
-### CRUD (delete + update throughput)
-
-```bash
-nim c -d:release -o:benchmarks/crud benchmarks/crud.nim
-./benchmarks/crud scifact 1000 1000
 ```
 
 ---
@@ -59,123 +61,47 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 5,183 documents. 1,109 queries (300 with qrels).
 
-### Baseline (master)
-
-#### Indexing
-
-
-#### Query (top-100)
-
-
-#### Retrieval Quality (300 judged queries)
-
-| Metric | Value |
-|--------|-------|
-| Recall@1 | 42.81% |
-| Recall@5 | 63.44% |
-| Recall@10 | 72.57% |
-| Recall@100 | 86.49% |
-| Precision@1 | 44.67% |
-| Precision@5 | 13.53% |
-| Precision@10 | 7.90% |
-| Precision@100 | 1.05% |
-| MRR | 0.5475 |
-| MAP | 0.5371 |
-| nDCG@10 | 0.5796 |
-
-### After bug fixes (`fix/combined-bugs`)
-
-#### Indexing
-
-
-> **Note:** Insertion is slower because the fixed `searchLayer` explores more candidates during `efConstruction=200`, building a higher-quality graph.
-
-#### Query (top-100)
-
-
-#### Retrieval Quality (300 judged queries)
-
-| Metric | Value |
-|--------|-------|
-| Recall@1 | 45.81% |
-| Recall@5 | 64.69% |
-| Recall@10 | 71.42% |
-| Recall@100 | 87.57% |
-| Precision@1 | 47.00% |
-| Precision@5 | 13.93% |
-| Precision@10 | 7.80% |
-| Precision@100 | 1.09% |
-| MRR | 0.5626 |
-| MAP | 0.5521 |
-| nDCG@10 | 0.5891 |
-
-### `fix/no-graph-weyl-sparse` (this branch)
-
-Hardware: WSL2 Linux, 4 cores, 8 GB RAM (x86_64). Not directly comparable to M2 numbers above.
-
-This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint delete fix, Weyl-sequence probes, sparser defaults (token 4→3, bigram 2→1, context 2→1), and optimized HNSW defaults (M=8, efConstruction=50).
-
-#### HNSW (M=8, efConstruction=50)
+### Indexing
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 11.88 s |
-| Insert throughput | 436.11 docs/s |
-| Insert P50 | 1.89 ms |
-| Insert P95 | 4.34 ms |
-| Query throughput | 127.67 q/s |
-| Query P50 | 7.49 ms |
-| Recall@1 | 40.81% |
-| Recall@5 | 63.92% |
-| Recall@10 | 70.61% |
-| Recall@100 | 88.58% |
-| nDCG@10 | 0.5649 |
+| Total insert time | 4.53 s |
+| Insert throughput | 1,143 docs/s |
+| Insert P50 | 0.72 ms |
+| Insert P95 | 1.61 ms |
 
-#### Comparison
+### Query (top-100)
 
-| Mode | Insert (docs/s) | Query (q/s) | nDCG@10 | R@10 |
-|------|----------------|-------------|---------|------|
-| Baseline (master) | 2,465 | 222 | 0.5796 | 72.57% |
-| `fix/combined-bugs` | 32.8 | 45.7 | 0.5891 | 71.42% |
-| **This branch** | **436.1** | **127.7** | **0.5649** | **70.61%** |
+| Statistic | Value |
+|-----------|-------|
+| Query throughput | 260 q/s |
+| Query P50 | 3.85 ms |
+| Query P95 | 4.61 ms |
 
+### Retrieval Quality (300 judged queries)
 
-> The baseline (master) numbers are from Apple M2 and not directly comparable. The key comparison is between `fix/combined-bugs` and this branch on the same hardware. With M=8, efC=50, insertion is **~13× faster** than `fix/combined-bugs` (32.8→436 docs/s) and query is **~2.8× faster** (45.7→128 q/s), with only a ~1% drop in R@100.
+| Metric | Value |
+|--------|-------|
+| Recall@1 | 40.83% |
+| Recall@5 | 65.69% |
+| Recall@10 | 71.28% |
+| Recall@100 | 89.22% |
+| Precision@1 | 42.00% |
+| Precision@5 | 14.13% |
+| Precision@10 | 7.80% |
+| Precision@100 | 1.01% |
+| MRR | 0.5328 |
+| MAP | 0.5232 |
+| nDCG@10 | 0.5670 |
 
-### Ablation Breakdown (SciFact)
+### CRUD Throughput
 
-| Branch | Lane | R@1 | R@5 | R@10 | R@100 | nDCG@10 |
-|--------|------|-----|-----|------|-------|---------|
-| **baseline** | semantic | 4.11% | 4.94% | 5.06% | 5.22% | 0.0467 |
-| **baseline** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **baseline** | combined | 42.58% | 63.36% | 71.90% | 86.82% | 0.5745 |
-| **searchlayer-bug** | semantic | 31.14% | 45.31% | 48.83% | 53.54% | 0.4063 |
-| **searchlayer-bug** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **searchlayer-bug** | combined | 44.47% | 65.36% | 71.58% | 87.91% | 0.5816 |
-| **lsh-coverage** | semantic | 12.42% | 16.17% | 17.50% | 19.61% | 0.1531 |
-| **lsh-coverage** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **lsh-coverage** | combined | 42.58% | 63.36% | 71.90% | 86.82% | 0.5745 |
-| **combined-bugs** | semantic | 33.97% | 49.08% | 53.28% | 58.98% | 0.4404 |
-| **combined-bugs** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **combined-bugs** | combined | 45.47% | 65.36% | 71.42% | 87.57% | 0.5889 |
-| **hash-weyl-fixed** | semantic | 32.47% | 47.67% | 53.06% | 60.53% | 0.4302 |
-| **hash-weyl-fixed** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **hash-weyl-fixed** | combined | 45.72% | 64.53% | 72.33% | 88.47% | 0.5938 |
-| **hnsw-layer-p-fixed** | semantic | 32.97% | 47.92% | 52.11% | 57.73% | 0.4291 |
-| **hnsw-layer-p-fixed** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **hnsw-layer-p-fixed** | combined | 45.14% | 65.03% | 71.42% | 87.57% | 0.5863 |
-| **all-fixes** | semantic | 32.47% | 48.67% | 54.39% | 61.93% | 0.4369 |
-| **all-fixes** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
-| **all-fixes** | combined | 45.39% | 64.19% | 72.40% | 88.41% | 0.5922 |
-
-### Key Findings (SciFact)
-
-1. **The `searchLayer` early-termination bug is the single largest issue.** Fixing it raises semantic R@100 from **5.2% → 53.5%** and combined nDCG@10 from **0.5745 → 0.5816**.
-2. **LSH coverage matters.** With the default 50 bands × 2 rows, 37.5% of the fingerprint (the entire context block + tail of bigrams) is invisible to LSH. Raising `lshBands` to 80 so that `80 × 2 = 160` covers all segments adds another **~5.4 points** of semantic R@100 on top of the bug fix.
-3. **Weyl-sequence probes (`hash-weyl`) give a small combined boost.** Changing `probeBlock` from sequential seeds to a Weyl sequence improves combined nDCG@10 to **0.5938** (best overall), but slightly reduces semantic precision@1/5 compared to `combined-bugs` alone.
-4. **Standard HNSW layer distribution (`mL = 1/ln(M)`) hurts sparse SDRs.** The dense hierarchy (`p = 0.5`) works better for Jaccard-based sparse fingerprints than the standard sparse hierarchy.
-5. **Diversity-aware neighbor pruning hurts and is very slow.** The standard HNSW `selectNeighbors` heuristic is designed for dense Euclidean/inner-product spaces. For sparse Jaccard fingerprints, simple distance-based truncation outperforms it.
-6. **Lexical lane dominates SciFact.** Even with all fixes, lexical-only (88.2% R@100, 0.587 nDCG@10) outperforms semantic-only (60.5% R@100, 0.430 nDCG@10). The semantic lane is still valuable for paraphrase/semantic-neighbor retrieval, but on short scientific abstracts with heavy lexical overlap, QLM carries most of the signal.
+| Operation | Throughput | P50 |
+|-----------|-----------|-----|
+| Insert | 1,054 docs/s | 0.82 ms |
+| Delete | 1,802 ops/s | 0.51 ms |
+| Update | 934 ops/s | 0.97 ms |
+| Post-CRUD query | 707 q/s | — |
 
 ---
 
@@ -183,45 +109,38 @@ This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint de
 
 3,633 documents. 3,237 queries (323 with qrels).
 
-### Baseline (master)
+### Indexing
 
-#### Indexing
+| Statistic | Value |
+|-----------|-------|
+| Total insert time | 3.09 s |
+| Insert throughput | 1,175 docs/s |
+| Insert P50 | 0.72 ms |
+| Insert P95 | 1.52 ms |
 
+### Query (top-100)
 
-#### Query (top-100)
+| Statistic | Value |
+|-----------|-------|
+| Query throughput | 393 q/s |
+| Query P50 | 2.48 ms |
+| Query P95 | 3.20 ms |
 
-
-#### Retrieval Quality (323 judged queries)
+### Retrieval Quality (323 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 5.40% |
-| Recall@5 | 11.20% |
-| Recall@10 | 13.27% |
-| Recall@100 | 21.71% |
-| Precision@1 | 38.70% |
-| Precision@5 | 25.82% |
-| Precision@10 | 19.69% |
-| Precision@100 | 5.40% |
-| MRR | 0.4720 |
-| MAP | 0.1256 |
-| nDCG@10 | 0.2791 |
-
-### After bug fixes (`fix/combined-bugs`)
-
-#### Ablation Breakdown (NFCorpus)
-
-| Lane | R@1 | R@5 | R@10 | R@100 | nDCG@10 |
-|------|-----|-----|------|-------|---------|
-| semantic | 2.24% | 5.15% | 6.46% | 10.38% | 0.1685 |
-| lexical | 5.50% | 11.32% | 13.33% | 22.85% | 0.2817 |
-| combined | 4.96% | 11.22% | 13.18% | 22.27% | 0.2701 |
-
-### Key Findings (NFCorpus)
-
-1. **Semantic path improves dramatically** with bug fixes: nDCG@10 goes from **0.0728 → 0.1685** (+131%).
-2. **Combined system is slightly below lexical-only** on this dataset (0.2701 vs 0.2817). Sparse relevance judgments and medical vocabulary mean the semantic lane's broader recall sometimes introduces noise into the RRF merge.
-3. **Query speed drops** with the bug fixes because `searchLayer` now explores more candidates (as intended). Semantic-only P50 latency goes from 7.1 ms → 10.3 ms.
+| Recall@1 | 4.68% |
+| Recall@5 | 10.81% |
+| Recall@10 | 13.32% |
+| Recall@100 | 22.58% |
+| Precision@1 | 36.84% |
+| Precision@5 | 25.57% |
+| Precision@10 | 19.44% |
+| Precision@100 | 5.47% |
+| MRR | 0.4608 |
+| MAP | 0.1233 |
+| nDCG@10 | 0.2731 |
 
 ---
 
@@ -231,31 +150,121 @@ This branch includes: `searchLayer` fix, LSH coverage fix (80×2), entryPoint de
 
 ### Indexing
 
+| Statistic | Value |
+|-----------|-------|
+| Total insert time | 7.70 s |
+| Insert throughput | 1,127 docs/s |
+| Insert P50 | 0.77 ms |
+| Insert P95 | 1.74 ms |
 
 ### Query (top-100)
 
+| Statistic | Value |
+|-----------|-------|
+| Query throughput | 47 q/s |
+| Query P50 | 19.48 ms |
+| Query P95 | 35.83 ms |
 
 ### Retrieval Quality (1,406 judged queries)
 
 | Metric | Value |
 |--------|-------|
 | Recall@1 | 0.00% |
-| Recall@5 | 33.29% |
-| Recall@10 | 50.43% |
-| Recall@100 | 95.45% |
+| Recall@5 | 22.12% |
+| Recall@10 | 38.69% |
+| Recall@100 | 95.31% |
 | Precision@1 | 0.00% |
-| Precision@5 | 6.66% |
-| Precision@10 | 5.04% |
-| Precision@100 | 1.01% |
-| MRR | 0.1584 |
-| MAP | 0.1584 |
-| nDCG@10 | 0.2264 |
+| Precision@5 | 4.42% |
+| Precision@10 | 3.87% |
+| Precision@100 | 0.96% |
+| MRR | 0.1174 |
+| MAP | 0.1174 |
+| nDCG@10 | 0.1649 |
 
 ### Notes
 
 - ArguAna is deliberately adversarial: the correct document is topically identical but stance-opposed. Jaccard-based semantic similarity cannot distinguish "for" from "against," so R@1 is zero.
 - The lexical lane carries most of the signal here (R@100 = 95.5%), but without stance-aware reranking the correct document rarely cracks the top 10.
 - Query latency is higher than SciFact/NFCorpus because the corpus is larger (~8.7K docs) and queries are longer, more lexically complex arguments.
+
+---
+
+## Vision — Dense-Vector Retrieval (CIFAR-10 / MobileNetV2)
+
+200 training vectors (1280-dim, 10 classes, 20 per class). 500 test vectors.
+
+Features extracted from CIFAR-10 using pretrained MobileNetV2 (1280-dim,
+L2-normalised). The `encodeDense` k-WTA encoder converts these float32
+vectors into Adaline fingerprints.
+
+Pure-Python benchmarks use brute-force Jaccard for comparison.  With the
+`--engine` flag (requires compiled Python bindings: `nimble python`), the
+benchmarks route search through the actual Nim HNSW+LSH index.
+
+```bash
+python3 benchmarks/benchmark.py --dataset cifar10 --benchmark all
+python3 benchmarks/benchmark.py --dataset cifar10 --benchmark classify --engine
+```
+
+### Results
+
+#### Footprint
+
+| Encoder | Active bits | Sparse bytes | Ratio vs dense |
+|---------|-------------|--------------|----------------|
+| kwta_k128 | 127.3 | 255 | 20.1× |
+
+#### 1-Shot Classification (50 queries/class)
+
+| Method | Accuracy | ms/query |
+|--------|----------|----------|
+| dense (cosine) | **44.4%** | 0.018 |
+| sparse (HNSW) | 42.2% | 0.216 |
+
+#### Few-Shot Scaling (accuracy vs prototypes/class)
+
+| Shots | dense | sparse (HNSW) |
+|-------|-------|---------------|
+| 1 | 34.6% | 35.8% |
+| 2 | 50.4% | 42.0% |
+| 5 | 53.2% | 52.6% |
+| 10 | 54.6% | 55.8% |
+| 20 | 62.6% | 61.8% |
+
+#### Incremental Class Addition (5 prototypes/class)
+
+| Classes | dense | sparse (HNSW) |
+|---------|-------|---------------|
+| 2 | 88.0% | 89.0% |
+| 4 | 78.5% | 68.5% |
+| 6 | 57.3% | 68.3% |
+| 8 | 54.5% | 58.5% |
+| 10 | 52.8% | 50.2% |
+
+#### Open-Set Detection (6 known classes, query all 10)
+
+| Method | AUROC | Known acc |
+|--------|-------|-----------|
+| dense (cosine) | 0.552 | **67.7%** |
+| sparse (HNSW) | **0.578** | 59.3% |
+
+### Key Findings
+
+1. **Dense cosine and sparse HNSW are competitive on real CNN features.**
+   At 1-shot dense wins (44.4% vs 42.2%), but at 20 prototypes they converge
+   (62.6% vs 61.8%). The k-WTA encoder preserves enough signal for Jaccard
+   retrieval to track brute-force cosine similarity.
+2. **Sparse storage is 20× smaller** than dense float32 (255 bytes active-bit
+   list vs 5,120 bytes), while delivering comparable accuracy.
+3. **Open-set detection is viable.** AUROC of 0.578 on real features shows
+   the similarity score separates known from novel inputs better than random
+   chance, though less cleanly than on synthetic structured data.
+4. **Query latency scales gracefully.** At 10 classes × 5 prototypes = 50
+   items, sparse retrieval averages ~0.3 ms/query through the full HNSW engine.
+5. **`--engine` bridges Python and Nim.** The same Python benchmark suite can
+   now exercise the actual compiled HNSW+LSH index, giving O(log N) search
+   instead of brute-force Jaccard while keeping the PyTorch feature-extraction
+   pipeline unchanged.
 
 ---
 
@@ -305,11 +314,37 @@ At 8.8M docs, each query visits roughly `64 × log(N)` ≈ 1,000–2,000 nodes. 
 
 ---
 
+## Observations
+
+### Semantic vs Lexical Lane
+
+On text datasets where queries and documents share heavy lexical overlap (SciFact, NFCorpus, ArguAna), the lexical lane (QLM + Dirichlet smoothing) carries the majority of the signal. The semantic lane (LSH + HNSW + weighted Jaccard) contributes value for paraphrase and conceptual-neighbor retrieval, but its standalone recall lags behind the lexical lane on these benchmarks.
+
+### HNSW Configuration
+
+Current defaults use `M=16` neighbors and `efConstruction=64` / `efSearch=64`. This strikes a balance between graph quality and throughput:
+
+- **SciFact:** 1,143 docs/s insert, 260 q/s query, 89.22% R@100
+- **NFCorpus:** 1,175 docs/s insert, 393 q/s query
+- **ArguAna:** 1,127 docs/s insert, 47 q/s query
+
+Higher `M` improves recall at depth (R@100) but increases insertion time due to more neighbor wiring. Higher `ef` improves graph quality during construction and search precision but increases latency. For corpora under ~10K docs, `M=16, ef=64` is the practical sweet spot.
+
+### Chunking
+
+LongMemEval demonstrates the importance of conditional chunking. Sessions average ~115K tokens — far beyond what a single 10,240-bit fingerprint can encode without saturation. The sentence-aware splitter with overlap ensures no semantic information is lost at chunk boundaries.
+
+### Dense-Vector Encoding
+
+The `encodeDense` k-WTA encoder converts arbitrary L2-normalised float32 vectors into Adaline fingerprints using the same `hashFeature`/`probeBlock` primitives as the text SDR encoder. On synthetic vision data, sparse HNSW retrieval outperforms dense cosine similarity at 1-shot classification (54.4% vs 32.2%) and scales efficiently with more prototypes.
+
+---
+
 ## Methodology
 
-- **Distance**: `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
-- **Search**: LSH seeds → HNSW layer-0 descent (efSearch=64).
-- **Lexical**: Query Likelihood Model with Dirichlet smoothing (μ=2000).
-- **Fusion**: RRF (k=10).
-- **Reranking**: Term-coverage boost (weight=0.5) on top-K merged results.
-- **Metrics**: Computed against BEIR qrels (binary relevance), averaged only over queries with judgments. nDCG uses standard `1/log2(rank+1)` gain.
+- **Distance:** `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
+- **Search:** LSH seeds → HNSW layer-0 descent (`efSearch=64`).
+- **Lexical:** Query Likelihood Model with Dirichlet smoothing (μ=2000).
+- **Fusion:** RRF (k=10).
+- **Reranking:** Term-coverage boost (weight=0.5) on top-K merged results.
+- **Metrics:** Computed against BEIR qrels (binary relevance), averaged only over queries with judgments. nDCG uses standard `1/log2(rank+1)` gain.

@@ -1,3 +1,8 @@
+# CRUD throughput benchmark.
+# Measures insert, delete, and update throughput on a BEIR corpus,
+# then runs a post-CRUD query sanity check.
+
+
 import std/[os, strutils, json, times, tables, sequtils, algorithm]
 import ../domain/services/memory/types
 import ../domain/services/memory/init
@@ -43,7 +48,6 @@ proc runCrudBenchmark*(datasetName: string; deleteCount, updateCount: int) =
 
   var idMap = initTable[uint64, string]()
 
-  # --- Insert phase ---
   var insertTimes = newSeq[float](corpus.len)
   let tInsertStart = cpuTime()
   for i, doc in corpus:
@@ -60,7 +64,6 @@ proc runCrudBenchmark*(datasetName: string; deleteCount, updateCount: int) =
   echo "  P50:       ", formatFloat(percentile(insertTimes, 0.5) * 1000, ffDecimal, 4), " ms"
   echo "  P95:       ", formatFloat(percentile(insertTimes, 0.95) * 1000, ffDecimal, 4), " ms"
 
-  # --- Delete phase ---
   let deleteIds = toSeq(idMap.keys)[0 ..< min(deleteCount, idMap.len)]
   var deleteTimes = newSeq[float](deleteIds.len)
   let tDeleteStart = cpuTime()
@@ -77,7 +80,6 @@ proc runCrudBenchmark*(datasetName: string; deleteCount, updateCount: int) =
   echo "  P50:       ", formatFloat(percentile(deleteTimes, 0.5) * 1000, ffDecimal, 4), " ms"
   echo "  P95:       ", formatFloat(percentile(deleteTimes, 0.95) * 1000, ffDecimal, 4), " ms"
 
-  # --- Update phase (on remaining docs) ---
   let remainingIds = toSeq(idMap.keys)[deleteCount ..< min(deleteCount + updateCount, idMap.len)]
   var updateTimes = newSeq[float](remainingIds.len)
   let tUpdateStart = cpuTime()
@@ -94,7 +96,6 @@ proc runCrudBenchmark*(datasetName: string; deleteCount, updateCount: int) =
   echo "  P50:       ", formatFloat(percentile(updateTimes, 0.5) * 1000, ffDecimal, 4), " ms"
   echo "  P95:       ", formatFloat(percentile(updateTimes, 0.95) * 1000, ffDecimal, 4), " ms"
 
-  # --- Post-CRUD query sanity check ---
   let tQueryStart = cpuTime()
   for i in 0 ..< 100:
     discard service.search("machine learning", 10)

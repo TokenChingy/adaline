@@ -18,6 +18,7 @@ use_cases/          <- One file per use-case. Each file declares its own
 domain/entities/    <- Core types: Fingerprint, HNSW node, Memory, Config, Chunk.
 domain/algorithms/  <- The math:
                        - SDR encoder (partitioned Tokens / Bigrams / XOR Context)
+                       - Dense encoder (k-WTA float32 vector → fingerprint)
                        - Regional weighted Jaccard
                        - Banded Fingerprint LSH (GoldFinger-style)
                        - HNSW construction and greedy search
@@ -28,12 +29,14 @@ domain/algorithms/  <- The math:
                        - Chunker (conditional sentence-aware splitting)
 domain/services/    <- Pure domain orchestration. Each operation lives in
                        `memory/` (types, init, insert, delete, update, search,
-                       checkpoint). Import the specific file; no umbrella re-export.
+                       checkpoint, insert_dense, search_dense, delete_dense).
+                       Import the specific file; no umbrella re-export.
  infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        graph store, chunks mapping store). Imported by domain
                        services when needed.
 bindings/           <- Python bindings (nimpy) exposing the same use cases.
-benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark.
+benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark,
+                       Python vision suite.
 tests/              <- Unit tests mirroring the folder layout.
 adaline.nim         <- The CLI entry point.
 ```
@@ -62,6 +65,7 @@ Use Cases ← Domain ← Infrastructure
 - **Delete / Update:** `deleteMemory()` and `updateMemory()` use an in-memory reverse edge index to heal HNSW neighbor lists without tombstones or full rebuilds
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
 - **Python bindings:** `bindings/adaline.nim` exposes `Engine` (insert, search, update, delete, stats, checkpoint) via nimpy. Build with `nimble python`.
+- **Dense-vector encoding:** `domain/algorithms/dense_encoder.nim` provides `encodeDense()` for converting L2-normalised float32 vectors into fingerprints via k-WTA, enabling vision / signal / tabular use cases.
 
 ## Semantic Path Diagnostics
 
@@ -96,16 +100,16 @@ Without this fix, a search after deleting the entry-point node dereferences a fr
 
 | Experiment | Branch | Result |
 |------------|--------|--------|
-| **Weyl-sequence probes** | `exp/hash-weyl-fixed` | Marginal combined nDCG@10 gain (+0.005 over `combined-bugs`), but changes fingerprint generation (breaks existing indexes). **Adopted on `fix/no-graph-weyl-sparse`.** |
+| **Weyl-sequence probes** | `exp/hash-weyl-fixed` | Marginal combined nDCG@10 gain, but changes fingerprint generation (breaks existing indexes). **Adopted on `fix/no-graph-weyl-sparse`.** |
 | **Standard HNSW layer distribution (`mL = 1/ln(M)`)** | `exp/hnsw-layer-p-fixed` | **Hurts** semantic recall. The dense hierarchy (`p=0.5`) works better for sparse Jaccard fingerprints than the standard sparse hierarchy. |
 | **Diversity-aware neighbor pruning** | `exp/diversity-heuristic` | **Hurts** semantic recall and is **~10× slower** at insertion. The standard HNSW `selectNeighbors` heuristic is designed for dense Euclidean spaces; simple distance truncation is superior for sparse SDRs. |
 
 ### Branch: `fix/no-graph-weyl-sparse`
 
-This branch removes the HNSW graph for small-corpus workloads (<10K docs), replaces correlated `probeBlock` hashing with a Weyl sequence, and increases fingerprint sparsity.
+This branch includes the three critical fixes (searchLayer, LSH coverage, entryPoint delete), replaces correlated `probeBlock` hashing with a Weyl sequence, and increases fingerprint sparsity.
 
 **Changes:**
-- **Config:** `hnswMaxNeighbors: 8`, `hnswEfConstruction: 50` (down from 32/200 for 5× faster insertion).
+- **Config:** `hnswMaxNeighbors: 16`, `hnswEfConstruction: 64`, `hnswEfSearch: 64`.
 - **Search (`domain/services/memory/search.nim`):** LSH seeds + HNSW approximate search.
 - **Insert (`domain/services/memory/insert.nim`):** WAL → corpus → chunk → fingerprint → LSH → lexical → HNSW.
 - **Delete (`domain/services/memory/delete.nim`):** Heals HNSW edges via reverse index; zeros fingerprint so deleted slots are skipped.
@@ -113,14 +117,13 @@ This branch removes the HNSW graph for small-corpus workloads (<10K docs), repla
 - **Sparsity defaults:** `tokenProbes: 4→3`, `bigramProbes: 2→1`, `contextProbes: 2→1`.
 - **LSH defaults:** `lshBands: 50→80`, `lshRows: 3→2` (full coverage of all 160 segments).
 - **Storage (`infrastructure/mmapped_storage.nim`):** `freeId` zeros the fingerprint so brute-force search skips deleted slots.
+- **Dense encoder (`domain/algorithms/dense_encoder.nim`):** New k-WTA encoder for float32 vectors (vision / signal / tabular).
+- **Python vision suite (`benchmarks/benchmark.py`, `dense_encoder.py`, `feature_extractor.py`, `dump_features.py`):** CIFAR-10 / ImageNet feature extraction and benchmarking.  `benchmark.py` can optionally exercise the actual compiled Adaline Engine (`--engine`) via Python bindings for HNSW+LSH search.
+- **Dense-vector pipeline (`domain/services/memory/insert_dense.nim`, `search_dense.nim`, `delete_dense.nim`):** Bypasses text chunking and lexical indexing to encode float32 vectors directly into fingerprints for vision / signal / tabular use cases.
 
-**Trade-off:** Brute-force is **~43× faster at insertion** and gives **~8 points higher semantic R@100** on SciFact, but query throughput drops from ~46 q/s to ~30 q/s. For <10K docs this is the superior choice.
+**Trade-off:** Compared to baseline (master), query throughput is **~17% higher** (222→260 q/s) with better R@100 (86.49%→89.22%). The denser graph (M=16) trades ~2× insertion speed for stronger recall at depth, while ef=64 keeps query latency competitive.
 
-### Recommended branch
-
-`fix/combined-bugs` contains the three critical fixes (searchLayer, LSH coverage, entryPoint delete) without any of the experimental changes that break compatibility or hurt performance.
-
-For small corpora where insertion speed and semantic recall matter more than query throughput, the HNSW graph can be disabled by setting `hnswMaxLayers: 0` (not recommended; use the no-graph branch instead).
+For small corpora where insertion speed and semantic recall matter more than query throughput, the HNSW graph can be disabled by setting `hnswMaxLayers: 0`.
 
 ## Agent hygiene
 

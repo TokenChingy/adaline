@@ -1,3 +1,10 @@
+# Memory-mapped storage adapter.
+# Manages WAL, fingerprint store, graph store, and chunk mapping
+# store as contiguous memory-mapped flat files with 256-byte
+# self-describing headers. Provides dense slot addressing,
+# freelist-based ID reuse, and 64 MiB pre-allocated growth.
+
+
 import ../domain/entities/fingerprint
 import ../domain/entities/hnsw_node
 import std/[memfiles, os]
@@ -6,7 +13,6 @@ const
   StoreHeaderSize = 256
   StoreMagic = "ADLN"
   StoreVersion = 1'u16
-  # Grow in 64 MiB chunks instead of doubling. This minimizes mmap remaps.
   GrowthChunkBytes = 64 * 1024 * 1024
 
 type
@@ -16,7 +22,7 @@ type
     recordSize: uint16
     recordCount: uint64
     capacity: uint64
-    freelistHead: uint64   # 0 = empty
+    freelistHead: uint64
     freelistCount: uint64
 
   MmappedStorage* = ref object
@@ -24,21 +30,17 @@ type
     walFile*: File
     walSize*: uint64
     fpMemFile*: MemFile
-    fpMem*: pointer          # Points to data area (after header)
+    fpMem*: pointer
     fpCapacity*: uint64
     graphMemFile*: MemFile
-    graphMem*: pointer       # Points to data area (after header)
+    graphMem*: pointer
     graphCapacity*: uint64
     chunksFile*: File
     chunksSize*: uint64
-    # Cached header fields (fingerprint file is canonical)
     recordCount*: uint64
     freelistHead*: uint64
     freelistCount*: uint64
 
-# ---------------------------------------------------------------------------
-# Header helpers
-# ---------------------------------------------------------------------------
 
 proc writeHeader(f: File; h: StoreHeader) =
   f.setFilePos(0)
@@ -81,9 +83,6 @@ proc isNewFormat(path: string): bool =
   discard f.readBuffer(addr magic[0], 4)
   result = (magic == [StoreMagic[0], StoreMagic[1], StoreMagic[2], StoreMagic[3]])
 
-# ---------------------------------------------------------------------------
-# File extension / pre-allocation
-# ---------------------------------------------------------------------------
 
 proc extendFile(path: string; newSize: uint64) =
   var f = system.open(path, fmReadWriteExisting)
@@ -92,11 +91,9 @@ proc extendFile(path: string; newSize: uint64) =
   f.close()
 
 proc preallocateFile(path: string; recordSize: uint64; minSlots: uint64): uint64 =
-  ## Pre-allocate file in 64MB chunks. Returns capacity in slots.
   let bytesPerChunk = uint64(GrowthChunkBytes)
   let slotsPerChunk = bytesPerChunk div recordSize
   if slotsPerChunk == 0:
-    # Record is larger than chunk size; just allocate enough for minSlots
     result = minSlots
   else:
     result = ((minSlots + slotsPerChunk - 1) div slotsPerChunk) * slotsPerChunk
@@ -104,9 +101,6 @@ proc preallocateFile(path: string; recordSize: uint64; minSlots: uint64): uint64
   let totalBytes = uint64(StoreHeaderSize) + result * recordSize
   extendFile(path, totalBytes)
 
-# ---------------------------------------------------------------------------
-# Growth helpers
-# ---------------------------------------------------------------------------
 
 proc growGraphStore*(storage: MmappedStorage; minCount: uint64) =
   if minCount <= storage.graphCapacity:
@@ -120,7 +114,6 @@ proc growGraphStore*(storage: MmappedStorage; minCount: uint64) =
   storage.graphMem = cast[pointer](cast[uint](storage.graphMemFile.mem) + uint(StoreHeaderSize))
   storage.graphCapacity = newCapacity
 
-  # Update header capacity
   var f = system.open(graphPath, fmReadWriteExisting)
   var h = readHeader(f)
   h.capacity = newCapacity
@@ -139,31 +132,24 @@ proc growFpStore*(storage: MmappedStorage; minCount: uint64) =
   storage.fpMem = cast[pointer](cast[uint](storage.fpMemFile.mem) + uint(StoreHeaderSize))
   storage.fpCapacity = newCapacity
 
-  # Update header capacity
   var f = system.open(fpPath, fmReadWriteExisting)
   var h = readHeader(f)
   h.capacity = newCapacity
   writeHeader(f, h)
   f.close()
 
-  # Ensure graph store keeps pace (eliminates separate check in allocId)
   if newCapacity > storage.graphCapacity:
     storage.growGraphStore(newCapacity)
 
-# ---------------------------------------------------------------------------
-# Init
-# ---------------------------------------------------------------------------
 
 proc initStorage*(dataDir: string): MmappedStorage =
   result = MmappedStorage(dataDir: dataDir)
   createDir(dataDir)
 
-  # WAL (append-only, variable length — standard File I/O)
   let walPath = dataDir / "wal.bin"
   result.walFile = system.open(walPath, fmAppend)
   result.walSize = uint64(getFileSize(walPath))
 
-  # Fingerprint store
   let fpPath = dataDir / "fingerprints.bin"
   if not fileExists(fpPath):
     var h = makeHeader(uint16(FingerprintBytes))
@@ -184,7 +170,6 @@ proc initStorage*(dataDir: string): MmappedStorage =
   result.fpMem = cast[pointer](cast[uint](result.fpMemFile.mem) + uint(StoreHeaderSize))
   result.fpCapacity = (fpSize - uint64(StoreHeaderSize)) div uint64(FingerprintBytes)
 
-  # Graph store
   let graphPath = dataDir / "graph.bin"
   if not fileExists(graphPath):
     var h = makeHeader(uint16(sizeof(HnswNode)))
@@ -205,20 +190,15 @@ proc initStorage*(dataDir: string): MmappedStorage =
   result.graphMem = cast[pointer](cast[uint](result.graphMemFile.mem) + uint(StoreHeaderSize))
   result.graphCapacity = (graphSize - uint64(StoreHeaderSize)) div uint64(sizeof(HnswNode))
 
-  # Chunk mapping file
   let chunksPath = dataDir / "chunks.bin"
   result.chunksFile = system.open(chunksPath, fmAppend)
   result.chunksSize = uint64(getFileSize(chunksPath))
 
-  # Load cached header fields from fingerprint file
   var fpHdr = readHeader(system.open(fpPath, fmRead))
   result.recordCount = fpHdr.recordCount
   result.freelistHead = fpHdr.freelistHead
   result.freelistCount = fpHdr.freelistCount
 
-# ---------------------------------------------------------------------------
-# WAL
-# ---------------------------------------------------------------------------
 
 proc appendWal*(storage: MmappedStorage; memoryId: uint64; timestamp: uint64; text: string): uint64 =
   result = storage.walSize
@@ -251,9 +231,6 @@ proc replayWal*(storage: MmappedStorage): seq[tuple[memoryId: uint64, timestamp:
     result.add((memoryId, timestamp, text))
   f.close()
 
-# ---------------------------------------------------------------------------
-# Chunk mappings
-# ---------------------------------------------------------------------------
 
 proc appendChunkMapping*(storage: MmappedStorage; parentMemoryId: uint64; chunkId: uint64): uint64 =
   result = storage.chunksSize
@@ -277,9 +254,6 @@ proc replayChunks*(storage: MmappedStorage): seq[tuple[parentMemoryId: uint64, c
     result.add((parentMemoryId, chunkId))
   f.close()
 
-# ---------------------------------------------------------------------------
-# Fingerprint / Graph access (slot-addressed)
-# ---------------------------------------------------------------------------
 
 proc getFingerprintPtr*(storage: MmappedStorage; memoryId: uint64): ptr Fingerprint {.inline.} =
   let offset = memoryId * uint64(FingerprintBytes)
@@ -293,7 +267,6 @@ proc writeFingerprint*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprin
           unsafeAddr fp, sizeof(Fingerprint))
 
 proc writeFingerprintUnsafe*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprint) {.inline.} =
-  ## Skip capacity check — caller must have ensured capacity (e.g. via allocId).
   let offset = memoryId * uint64(FingerprintBytes)
   copyMem(cast[pointer](cast[uint](storage.fpMem) + uint(offset)),
           unsafeAddr fp, sizeof(Fingerprint))
@@ -306,12 +279,8 @@ proc ensureGraphCapacity*(storage: MmappedStorage; memoryId: uint64) {.inline.} 
   if memoryId >= storage.graphCapacity:
     storage.growGraphStore(memoryId + 1)
 
-# ---------------------------------------------------------------------------
-# Freelist (canonical in fingerprint file header)
-# ---------------------------------------------------------------------------
 
 proc syncHeader*(storage: MmappedStorage) =
-  ## Persist cached header fields to disk.
   let fpPath = storage.dataDir / "fingerprints.bin"
   var f = system.open(fpPath, fmReadWriteExisting)
   var h = readHeader(f)
@@ -322,7 +291,6 @@ proc syncHeader*(storage: MmappedStorage) =
   f.close()
 
 proc allocId*(storage: MmappedStorage): uint64 =
-  ## Allocate a slot from the freelist or by appending. Returns slot index.
   if storage.freelistHead != FreelistNull:
     result = storage.freelistHead
     let nextPtr = cast[ptr uint64](cast[pointer](
@@ -336,17 +304,13 @@ proc allocId*(storage: MmappedStorage): uint64 =
       storage.growFpStore(result + 1)
 
 proc freeId*(storage: MmappedStorage; id: uint64) =
-  ## Return a slot to the freelist.
   let fpPtr = storage.getFingerprintPtr(id)
-  # Zero the fingerprint so brute-force search skips deleted slots
   zeroMem(fpPtr, FingerprintBytes)
-  # Link into freelist (first 8 bytes of the zeroed fingerprint)
   let nextPtr = cast[ptr uint64](cast[pointer](
     cast[uint](storage.fpMem) + uint(id * uint64(FingerprintBytes))))
   nextPtr[] = storage.freelistHead
   storage.freelistHead = id
   storage.freelistCount.inc
-  # Mark graph node as deleted (layerCount = 0)
   let node = storage.getHnswNodePtr(id)
   clearNode(node)
 
@@ -357,7 +321,6 @@ proc freeIdCount*(storage: MmappedStorage): uint64 =
   result = storage.freelistCount
 
 proc syncRecordCount*(storage: MmappedStorage; count: uint64) =
-  ## Update the header's recordCount to reflect the high-water mark.
   if storage.recordCount < count:
     storage.recordCount = count
   if count > storage.graphCapacity:

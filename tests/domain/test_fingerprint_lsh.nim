@@ -1,3 +1,6 @@
+# Unit tests for Fingerprint LSH algorithm.
+
+
 import unittest
 import ../../domain/entities/fingerprint
 import ../../domain/entities/config
@@ -32,25 +35,20 @@ suite "Fingerprint LSH (GoldFinger-style)":
   test "dissimilar fingerprints have low collision probability":
     var a = initFingerprint()
     var b = initFingerprint()
-    # a and b share no bits at all
     a.setBit(1)
     b.setBit(9999)
     let cfg = defaultEngineConfig()
     var idx = initLshIndex(cfg)
     insertLsh(idx, addr a, 1'u64)
     let results = queryLsh(idx, addr b)
-    # With 50 bands and completely disjoint fingerprints,
-    # occasional false collisions can happen; just ensure it's rare
     check results.len <= 1
 
   test "similar fingerprints have high collision probability":
     var a = initFingerprint()
     var b = initFingerprint()
-    # Set 80% of the same bits
     for i in 0 ..< 100:
       a.setBit(i * 10)
       b.setBit(i * 10)
-    # Set 20% different bits
     for i in 0 ..< 20:
       a.setBit(5000 + i)
       b.setBit(8000 + i)
@@ -59,6 +57,5 @@ suite "Fingerprint LSH (GoldFinger-style)":
     var idx = initLshIndex(cfg)
     insertLsh(idx, addr a, 1'u64)
     let results = queryLsh(idx, addr b)
-    # With high similarity, we expect at least some collision
     check results.len > 0
     check results[0] == 1'u64

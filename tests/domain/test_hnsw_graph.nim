@@ -1,3 +1,6 @@
+# Unit tests for HNSW graph algorithm.
+
+
 import unittest
 import ../../domain/algorithms/hnsw_graph
 import ../../domain/entities/fingerprint
@@ -64,7 +67,6 @@ suite "HNSW graph":
     var entryPoint: uint64 = 0
     var reverseIndex = initTable[uint64, seq[uint64]]()
 
-    # Insert two similar fingerprints
     for id in 1'u64 .. 2'u64:
       var fp = initFingerprint()
       setBit(fp, 0)
@@ -80,7 +82,6 @@ suite "HNSW graph":
     let node2 = getHnswNodePtr(graphMem, 2'u64)
     check node2.layerCount > 0
 
-    # Node 2 should have node 1 as a neighbor on at least one layer
     var hasNeighbor = false
     for lc in 0 ..< int(node2.layerCount):
       for nid in node2.neighbors(lc):
@@ -100,7 +101,6 @@ suite "HNSW graph":
     var entryPoint: uint64 = 0
     var reverseIndex = initTable[uint64, seq[uint64]]()
 
-    # Insert 5 fingerprints with some overlapping bits
     for id in 1'u64 .. 5'u64:
       var fp = initFingerprint()
       for b in 0 ..< 50:
@@ -111,7 +111,6 @@ suite "HNSW graph":
       insertHnsw(graphMem, fpMem, id, cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset))),
                  cfg, maxLayer, entryPoint, reverseIndex)
 
-    # Query with a fingerprint similar to id 3
     var qfp = initFingerprint()
     for b in 0 ..< 50:
       setBit(qfp, b)
@@ -129,7 +128,6 @@ suite "HNSW graph":
       dealloc(graphMem)
       dealloc(fpMem)
 
-    # Create a simple 2-node graph on layer 0
     var fp1 = initFingerprint()
     setBit(fp1, 0)
     setBit(fp1, 1)
@@ -157,6 +155,5 @@ suite "HNSW graph":
     let results = searchLayer(graphMem, fpMem, addr qfp, 1'u64, 0, 10, cfg)
     check results.len >= 1
     check results[0].id == 1'u64
-    # Results should be sorted by ascending distance
     for i in 1 ..< results.len:
       check results[i].dist >= results[i-1].dist

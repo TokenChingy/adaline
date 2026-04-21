@@ -1,3 +1,6 @@
+# Unit tests for Chunk entity.
+
+
 import unittest
 import ../../domain/entities/chunk
 

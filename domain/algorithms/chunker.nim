@@ -1,3 +1,9 @@
+# Sentence-aware conditional chunker.
+# Splits long text into multiple chunks when any fingerprint block
+# (tokens, bigrams, or XOR-context) approaches saturation.
+# Splits on sentence boundaries with one-sentence overlap.
+
+
 import ../entities/config
 import std/strutils
 
@@ -52,7 +58,6 @@ proc splitIntoChunks*(text: string; cfg: EngineConfig): seq[string] =
   if sentences.len == 0:
     return @[text]
   if sentences.len == 1:
-    # Single sentence too long: accept saturation rather than splitting mid-sentence
     return @[text]
 
   result = @[]
@@ -62,7 +67,6 @@ proc splitIntoChunks*(text: string; cfg: EngineConfig): seq[string] =
     let testChunk = currentChunk & " " & sentences[i]
     if shouldChunk(testChunk, cfg) and currentChunk.len > 0:
       result.add(currentChunk)
-      # Overlap: start new chunk with previous sentence + current sentence
       if i > 0:
         currentChunk = sentences[i - 1] & " " & sentences[i]
         if shouldChunk(currentChunk, cfg):

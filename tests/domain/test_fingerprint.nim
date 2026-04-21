@@ -1,3 +1,6 @@
+# Unit tests for Fingerprint entity.
+
+
 import unittest
 import ../../domain/entities/fingerprint
 import ../../domain/entities/config

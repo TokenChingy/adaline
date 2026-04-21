@@ -1,3 +1,6 @@
+# Unit tests for Chunker algorithm.
+
+
 import unittest
 import ../../domain/algorithms/chunker
 import ../../domain/entities/config

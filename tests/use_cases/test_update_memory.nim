@@ -1,3 +1,6 @@
+# Unit tests for Update Memory use case.
+
+
 import unittest
 import ../../domain/services/memory/init
 import ../../domain/services/memory/search
@@ -35,7 +38,6 @@ suite "Update memory use case":
 
     discard updateMemory(svc, UpdateMemoryInput(memoryId: id, content: "updated text"))
 
-    # Approximate search can produce accidental low-scoring matches.
     let oldResults = svc.search("original", 5)
     var found = false
     var foundScore = 0.0

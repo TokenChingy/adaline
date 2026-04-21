@@ -1,3 +1,6 @@
+# Unit tests for EngineConfig entity.
+
+
 import unittest
 import ../../domain/entities/config
 
@@ -29,7 +32,7 @@ suite "EngineConfig":
     check cfg.hnswEfConstruction > 0
     check cfg.hnswEfSearch > 0
 
-  test "defaultEngineConfig has ablation flags enabled":
+  test "defaultEngineConfig has semantic and lexical search enabled":
     let cfg = defaultEngineConfig()
     check cfg.semanticSearchEnabled == true
     check cfg.lexicalSearchEnabled == true

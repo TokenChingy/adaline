@@ -1,5 +1,10 @@
+# BEIR benchmark runner.
+# Downloads, indexes, and queries BEIR datasets (SciFact, NFCorpus,
+# ArguAna, MS MARCO). Reports insert throughput, query latency,
+# and retrieval quality metrics (Recall, Precision, MRR, MAP, nDCG).
+
+
 import std/[os, strutils, json, times, tables, sets, sequtils, algorithm, math]
-import ../domain/services/memory/types
 import ../domain/services/memory/init
 import ../domain/services/memory/insert
 import ../domain/services/memory/search
@@ -169,11 +174,9 @@ proc runBenchmark*(datasetName: string) =
   removeDir(benchDir)
   var service = initMemoryService(benchDir, cfg)
 
-  # Map dataset string IDs to our uint64 MemoryIDs
   var idMap = initTable[uint64, string]()
   var reverseIdMap = initTable[string, uint64]()
 
-  # --- Benchmark: full insert ---
   var insertTimes = newSeq[float](corpus.len)
   let tInsertStart = cpuTime()
   for i, doc in corpus:
@@ -184,7 +187,6 @@ proc runBenchmark*(datasetName: string) =
     reverseIdMap[doc.id] = memId
   let totalInsert = cpuTime() - tInsertStart
 
-  # --- Benchmark: query speed ---
   var queryTimes = newSeq[float](queries.len)
   var allResults = initTable[string, seq[string]]()
   let tQueryStart = cpuTime()
@@ -195,7 +197,6 @@ proc runBenchmark*(datasetName: string) =
     allResults[q.id] = res.mapIt(idMap.getOrDefault(it.id, ""))
   let totalQuery = cpuTime() - tQueryStart
 
-  # --- Metrics ---
   sort(insertTimes)
   sort(queryTimes)
 

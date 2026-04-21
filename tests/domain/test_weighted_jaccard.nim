@@ -1,3 +1,6 @@
+# Unit tests for Weighted Jaccard algorithm.
+
+
 import unittest
 import ../../domain/entities/fingerprint
 import ../../domain/entities/config
@@ -16,13 +19,12 @@ suite "Weighted Jaccard":
   test "disjoint fingerprints have Jaccard 0.0":
     var a = initFingerprint()
     var b = initFingerprint()
-    # Place bits in different blocks so all regions are disjoint
-    a.setBit(0)      # Block A
-    a.setBit(4096)   # Block B
-    a.setBit(7168)   # Block C
-    b.setBit(1)      # Block A (different from 0)
-    b.setBit(4097)   # Block B (different from 4096)
-    b.setBit(7169)   # Block C (different from 7168)
+    a.setBit(0)
+    a.setBit(4096)
+    a.setBit(7168)
+    b.setBit(1)
+    b.setBit(4097)
+    b.setBit(7169)
     let cfg = defaultEngineConfig()
     let j = weightedJaccard(addr a, addr b, cfg)
     check j == 0.0

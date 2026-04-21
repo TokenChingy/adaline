@@ -1,3 +1,6 @@
+# Unit tests for LexicalIndex algorithm.
+
+
 import unittest
 import std/tables
 import ../../domain/algorithms/lexical_index

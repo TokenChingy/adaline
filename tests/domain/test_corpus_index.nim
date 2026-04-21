@@ -1,3 +1,6 @@
+# Unit tests for CorpusIndex algorithm.
+
+
 import unittest
 import std/tables
 import ../../domain/algorithms/corpus_index

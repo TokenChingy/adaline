@@ -1,3 +1,6 @@
+# Unit tests for HNSW node entity.
+
+
 import unittest
 import ../../domain/entities/hnsw_node
 

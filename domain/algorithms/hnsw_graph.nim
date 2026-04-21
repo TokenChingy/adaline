@@ -1,3 +1,9 @@
+# Hierarchical Navigable Small World (HNSW) graph.
+# Construction, greedy best-first search, and neighbor selection
+# for sparse fingerprint vectors using weighted Jaccard distance.
+# Includes layer assignment, edge wiring, and graph healing on delete.
+
+
 import ../entities/fingerprint
 import ../entities/hnsw_node
 import ../entities/config
@@ -85,7 +91,6 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       selected.add(neighbors[i].id)
     setNeighbors(node, lc, selected)
 
-    # Forward edges: memoryId → selected. Record in reverse index.
     for nid in selected:
       reverseIndex.mgetOrPut(nid, @[]).add(memoryId)
 
@@ -95,9 +100,6 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       for nnid in nnode.neighbors(lc):
         oldNeighbors.add(nnid)
 
-      # Fast neighbor update: compute distance to new node only,
-      # then compare against worst existing neighbor. Avoids
-      # recomputing distances for all old neighbors.
       let newDist = 1.0 - weightedJaccard(
         getFingerprintPtr(fpMem, nid),
         getFingerprintPtr(fpMem, memoryId), cfg)
@@ -105,14 +107,12 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       if oldNeighbors.len < cfg.hnswMaxNeighbors:
         oldNeighbors.add(memoryId)
         setNeighbors(nnode, lc, oldNeighbors)
-        # New edge nid → memoryId; add nid to reverse[memoryId]
         var list = reverseIndex.mgetOrPut(memoryId, @[])
         if nid notin list:
           list.add(nid)
           reverseIndex[memoryId] = list
         continue
 
-      # Find worst existing neighbor (largest distance = smallest Jaccard)
       var worstDist = newDist
       var worstIdx = -1
       for i, nnid in oldNeighbors:
@@ -124,21 +124,16 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
           worstIdx = i
 
       if worstIdx >= 0:
-        # Replace worst with new node
         let dropped = oldNeighbors[worstIdx]
         oldNeighbors[worstIdx] = memoryId
         setNeighbors(nnode, lc, oldNeighbors)
-        # Edge nid → dropped was removed
         if reverseIndex.hasKey(dropped):
           reverseIndex[dropped] = reverseIndex[dropped].filterIt(it != nid)
-        # Edge nid → memoryId is new
         var list = reverseIndex.mgetOrPut(memoryId, @[])
         if nid notin list:
           list.add(nid)
           reverseIndex[memoryId] = list
       else:
-        # New node is worse than all existing; no change to nid's neighbors.
-        # Remove nid from reverse[memoryId] since edge nid→memoryId won't exist.
         if reverseIndex.hasKey(memoryId):
           reverseIndex[memoryId] = reverseIndex[memoryId].filterIt(it != nid)
 
@@ -153,33 +148,28 @@ proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint6
                  queryFp: ptr Fingerprint; k: int; cfg: EngineConfig): seq[tuple[memoryId: uint64, score: float]] =
   var allResults = initTable[uint64, float]()
 
-  # --- Lane 1: Score LSH seeds directly ---
   for seed in seeds:
     if not allResults.hasKey(seed):
       let sptr = getFingerprintPtr(fpMem, seed)
       let score = weightedJaccard(queryFp, sptr, cfg)
       allResults[seed] = score
 
-  # --- Lane 2: Standard HNSW descent from entry point ---
   if entryPoint != 0:
     let entryNode = getHnswNodePtr(graphMem, entryPoint)
     let maxLayer = int(entryNode.entryLayer)
     var currEp = entryPoint
 
-    # Greedy descent from top layer to layer 1
     for lc in countdown(maxLayer, 1):
       let neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, lc, 1, cfg)
       if neighbors.len > 0:
         currEp = neighbors[0].id
 
-    # Beam search at layer 0 with efSearch
     let layer0Neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, 0, cfg.hnswEfSearch, cfg)
     for (nid, dist) in layer0Neighbors:
       let score = 1.0 - dist
       if not allResults.hasKey(nid) or score > allResults[nid]:
         allResults[nid] = score
 
-  # Sort and return top-k
   var sorted = newSeq[tuple[score: float, memoryId: uint64]]()
   for mid, score in allResults:
     sorted.add((score, mid))

@@ -1,18 +1,19 @@
+# Banded Fingerprint LSH (GoldFinger-style).
+# Partitions the 10,240-bit fingerprint into bands and rows for
+# locality-sensitive hashing. Each band hash seeds candidate retrieval
+# into the HNSW graph layer 0.
+
+
 import ../entities/fingerprint
 import ../entities/config
 import std/[tables, sets]
 
-# GoldFinger-style direct fingerprint banding.
-# Instead of MinHash signatures, we partition the fingerprint's uint64 segments
-# into bands and hash each band directly. Two similar fingerprints will share
-# many identical segments, giving high collision probability in LSH buckets.
 
 type
   FingerprintLshIndex* = object
     cfg*: EngineConfig
     buckets*: Table[(int, uint64), seq[uint64]]
 
-# Build a band hash directly from fingerprint segments.
 proc bandHash*(fp: ptr Fingerprint; bandId, rows: int): uint64 =
   var h: uint64 = uint64(bandId) * 0x9e3779b97f4a7c15'u64
   for r in 0 ..< rows:
@@ -55,9 +56,6 @@ proc queryLsh*(index: FingerprintLshIndex; fp: ptr Fingerprint): seq[uint64] =
           seen.incl(id)
           result.add(id)
 
-# ---------------------------------------------------------------------------
-# Serialization (flat binary)
-# ---------------------------------------------------------------------------
 
 proc saveLsh*(index: FingerprintLshIndex; path: string; walOffset: uint64 = 0) =
   var f = open(path, fmWrite)
