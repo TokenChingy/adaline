@@ -1,3 +1,9 @@
+## Update memory service.
+## Performs a logical atomic delete-then-insert: heals the old
+## chunks out of the graph, then re-inserts updated content and
+## maps fresh chunks back to the original parent ID.
+
+
 import ./types
 import ./delete
 import ../../algorithms/sdr_encoder
@@ -12,27 +18,20 @@ import std/[tables, times]
 export types
 
 proc updateMemory*(service: var MemoryService; parentId: uint64; content: string) =
-  ## Update a memory's content. Deletes old chunks and inserts new ones,
-  ## preserving the parent ID.
   if not service.textCache.hasKey(parentId):
     return
 
-  # Delete old chunks (heals graph, frees slots)
   deleteMemory(service, parentId)
 
-  # Insert new content, reusing the same parentId
   let timestamp = uint64(getTime().toUnix())
   var storage = service.storage
 
-  # WAL: append update record
   discard storage.appendWal(parentId, timestamp, content)
   service.textCache[parentId] = content
   service.timestampCache[parentId] = timestamp
 
-  # Update corpus
   service.corpus.addMemory(content)
 
-  # Chunk and index
   let chunks = splitIntoChunks(content, service.cfg)
 
   if chunks.len == 1:

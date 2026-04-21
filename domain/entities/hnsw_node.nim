@@ -1,7 +1,13 @@
+## HNSW node entity.
+## Defines the in-memory layout of an HNSW graph node: layer count,
+## neighbor count per layer, and a flat neighbor ID array.
+## Sized to 1,032 bytes for dense slot addressing.
+
+
 const
   HnswMaxLayers* = 8
   HnswMaxNeighbors* = 32
-  HnswNeighborSlots* = HnswMaxLayers * HnswMaxNeighbors  # 256
+  HnswNeighborSlots* = HnswMaxLayers * HnswMaxNeighbors
 
 type
   HnswNode* = object
@@ -30,8 +36,6 @@ proc setNeighbors*(node: ptr HnswNode; layer: int; nids: seq[uint64]) =
       node.neighbors[start + i] = 0
 
 proc removeNeighbor*(node: ptr HnswNode; layer: int; targetId: uint64): bool =
-  ## Remove targetId from the neighbor list at the given layer.
-  ## Shifts remaining neighbors left. Returns true if found.
   let start = layer * HnswMaxNeighbors
   for i in 0 ..< HnswMaxNeighbors:
     if uint64(node.neighbors[start + i]) == targetId:

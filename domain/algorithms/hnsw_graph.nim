@@ -1,3 +1,9 @@
+## Hierarchical Navigable Small World (HNSW) graph.
+## Construction, greedy best-first search, and neighbor selection
+## for sparse fingerprint vectors using weighted Jaccard distance.
+## Includes layer assignment, edge wiring, and graph healing on delete.
+
+
 import ../entities/fingerprint
 import ../entities/hnsw_node
 import ../entities/config
@@ -35,7 +41,7 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
 
   while candidates.len > 0:
     let curr = candidates.pop()
-    if results.len > 0 and curr.dist > -results[0].negDist:
+    if results.len >= ef and curr.dist > -results[0].negDist:
       break
 
     results.push((-curr.dist, curr.id))
@@ -85,7 +91,6 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       selected.add(neighbors[i].id)
     setNeighbors(node, lc, selected)
 
-    # Forward edges: memoryId → selected. Record in reverse index.
     for nid in selected:
       reverseIndex.mgetOrPut(nid, @[]).add(memoryId)
 
@@ -94,38 +99,43 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       var oldNeighbors = newSeq[uint64]()
       for nnid in nnode.neighbors(lc):
         oldNeighbors.add(nnid)
-      oldNeighbors.add(memoryId)
 
-      var scored = newSeq[tuple[dist: float, id: uint64]]()
-      for nnid in oldNeighbors:
-        let nnptr = getFingerprintPtr(fpMem, nnid)
-        let d = 1.0 - weightedJaccard(getFingerprintPtr(fpMem, nid), nnptr, cfg)
-        scored.add((d, nnid))
+      let newDist = 1.0 - weightedJaccard(
+        getFingerprintPtr(fpMem, nid),
+        getFingerprintPtr(fpMem, memoryId), cfg)
 
-      scored.sort(proc(a, b: auto): int =
-        if a.dist < b.dist: return -1
-        if a.dist > b.dist: return 1
-        return 0
-      )
+      if oldNeighbors.len < cfg.hnswMaxNeighbors:
+        oldNeighbors.add(memoryId)
+        setNeighbors(nnode, lc, oldNeighbors)
+        var list = reverseIndex.mgetOrPut(memoryId, @[])
+        if nid notin list:
+          list.add(nid)
+          reverseIndex[memoryId] = list
+        continue
 
-      var kept = newSeq[uint64]()
-      for i in 0 ..< min(scored.len, cfg.hnswMaxNeighbors):
-        kept.add(scored[i].id)
-      setNeighbors(nnode, lc, kept)
+      var worstDist = newDist
+      var worstIdx = -1
+      for i, nnid in oldNeighbors:
+        let d = 1.0 - weightedJaccard(
+          getFingerprintPtr(fpMem, nid),
+          getFingerprintPtr(fpMem, nnid), cfg)
+        if d > worstDist:
+          worstDist = d
+          worstIdx = i
 
-      # Update reverse index for edges that were dropped or kept by nid
-      for o in oldNeighbors:
-        if o notin kept:
-          # Edge nid → o was dropped; remove nid from reverse[o]
-          if reverseIndex.hasKey(o):
-            reverseIndex[o] = reverseIndex[o].filterIt(it != nid)
-      for k in kept:
-        if k == memoryId or k notin oldNeighbors[0 ..< oldNeighbors.len - 1]:
-          # Edge nid → k is new or retained; ensure nid is in reverse[k]
-          var list = reverseIndex.mgetOrPut(k, @[])
-          if nid notin list:
-            list.add(nid)
-            reverseIndex[k] = list
+      if worstIdx >= 0:
+        let dropped = oldNeighbors[worstIdx]
+        oldNeighbors[worstIdx] = memoryId
+        setNeighbors(nnode, lc, oldNeighbors)
+        if reverseIndex.hasKey(dropped):
+          reverseIndex[dropped] = reverseIndex[dropped].filterIt(it != nid)
+        var list = reverseIndex.mgetOrPut(memoryId, @[])
+        if nid notin list:
+          list.add(nid)
+          reverseIndex[memoryId] = list
+      else:
+        if reverseIndex.hasKey(memoryId):
+          reverseIndex[memoryId] = reverseIndex[memoryId].filterIt(it != nid)
 
     if neighbors.len > 0:
       currEp = neighbors[0].id
@@ -138,33 +148,28 @@ proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint6
                  queryFp: ptr Fingerprint; k: int; cfg: EngineConfig): seq[tuple[memoryId: uint64, score: float]] =
   var allResults = initTable[uint64, float]()
 
-  # --- Lane 1: Score LSH seeds directly ---
   for seed in seeds:
     if not allResults.hasKey(seed):
       let sptr = getFingerprintPtr(fpMem, seed)
       let score = weightedJaccard(queryFp, sptr, cfg)
       allResults[seed] = score
 
-  # --- Lane 2: Standard HNSW descent from entry point ---
   if entryPoint != 0:
     let entryNode = getHnswNodePtr(graphMem, entryPoint)
     let maxLayer = int(entryNode.entryLayer)
     var currEp = entryPoint
 
-    # Greedy descent from top layer to layer 1
     for lc in countdown(maxLayer, 1):
       let neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, lc, 1, cfg)
       if neighbors.len > 0:
         currEp = neighbors[0].id
 
-    # Beam search at layer 0 with efSearch
     let layer0Neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, 0, cfg.hnswEfSearch, cfg)
     for (nid, dist) in layer0Neighbors:
       let score = 1.0 - dist
       if not allResults.hasKey(nid) or score > allResults[nid]:
         allResults[nid] = score
 
-  # Sort and return top-k
   var sorted = newSeq[tuple[score: float, memoryId: uint64]]()
   for mid, score in allResults:
     sorted.add((score, mid))

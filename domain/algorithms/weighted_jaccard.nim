@@ -1,3 +1,9 @@
+## Regional weighted Jaccard similarity.
+## Computes Jaccard over three fingerprint regions (tokens, bigrams,
+## context) with configurable block weights, using hardware popcount
+## for fast bit-level intersection and union.
+
+
 import std/bitops
 import ../entities/fingerprint
 import ../entities/config

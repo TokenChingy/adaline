@@ -1,3 +1,9 @@
+## Fingerprint entity.
+## A fixed-size 10,240-bit (1,280-byte) bitmap representing a sparse
+## distributed representation. Provides bit-level get/set operations
+## and population count.
+
+
 import std/bitops
 import config
 
@@ -29,7 +35,6 @@ proc popcountRegionOr*(a, b: ptr Fingerprint; segmentStart, segmentCount: int): 
   for i in segmentStart ..< segmentStart + segmentCount:
     result += popcount(a.bits[i] or b.bits[i])
 
-# Segment boundaries are derived from config so block sizes remain fully configurable.
 proc tokenSegmentStart*(cfg: EngineConfig): int = 0
 proc tokenSegmentCount*(cfg: EngineConfig): int = cfg.tokenBits shr 6
 

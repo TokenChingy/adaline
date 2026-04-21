@@ -1,3 +1,8 @@
+## Checkpoint service.
+## Serializes in-memory indexes (LSH buckets, lexical postings,
+## corpus IDF tables) to disk so startup can skip full WAL replay.
+
+
 import ./types
 import ../../algorithms/fingerprint_lsh
 import ../../algorithms/lexical_index
@@ -7,7 +12,6 @@ import std/os
 export types
 
 proc checkpoint*(service: var MemoryService) =
-  ## Persist in-memory indexes to disk so future restarts can skip WAL replay.
   let walOffset = service.storage.walSize
   let lshPath = service.storage.dataDir / "lsh.bin"
   let lexicalPath = service.storage.dataDir / "lexical.bin"

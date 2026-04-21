@@ -1,3 +1,8 @@
+## Memory service initialisation.
+## Creates or opens the memory-mapped storage (WAL, fingerprint store,
+## graph store, chunks store) and replays WAL and chunk mappings.
+
+
 import ./types
 import ../../entities/config
 import ../../entities/hnsw_node
@@ -25,7 +30,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   result.chunkToParent = initTable[uint64, uint64]()
   result.hnswReverseIndex = initTable[uint64, seq[uint64]]()
 
-  # Try loading persisted indexes
   let lshPath = dataDir / "lsh.bin"
   let lexicalPath = dataDir / "lexical.bin"
   let corpusPath = dataDir / "corpus.bin"
@@ -47,7 +51,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
                         else:
                           0'u64
 
-  # Replay chunk mappings first
   let chunkEntries = replayChunks(result.storage)
   var parentToChunks = initTable[uint64, seq[uint64]]()
   var maxId: uint64 = 0
@@ -59,8 +62,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
       maxId = chunkId
     hasData = true
 
-  # Replay WAL: always rebuild textCache/timestampCache; only rebuild
-  # LSH/lexical/corpus for entries after persistedOffset
   let entries = replayWal(result.storage)
   var walPos: uint64 = 0
   for (parentId, timestamp, text) in entries:
@@ -74,7 +75,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
     let entryStart = walPos
     walPos += entrySize
 
-    # Determine chunk IDs for this parent
     let storedChunkIds = parentToChunks.getOrDefault(parentId, @[])
     let chunkTexts = splitIntoChunks(text, cfg)
     let effectiveChunkIds = if storedChunkIds.len > 0:
@@ -84,10 +84,8 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
     let numChunks = min(effectiveChunkIds.len, chunkTexts.len)
 
     if entryStart < persistedOffset:
-      # Already in persisted indexes; just rebuild corpus (needed for IDF)
       result.corpus.addMemory(text)
     else:
-      # New entry since last checkpoint
       result.corpus.addMemory(text)
       for i in 0 ..< numChunks:
         let chunkId = effectiveChunkIds[i]
@@ -96,7 +94,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
         let fpPtr = result.storage.getFingerprintPtr(chunkId)
         insertLsh(result.lsh, fpPtr, chunkId)
 
-    # Find HNSW entry point from stored graph (always needed)
     for i in 0 ..< numChunks:
       let chunkId = effectiveChunkIds[i]
       let node = result.storage.getHnswNodePtr(chunkId)
@@ -109,7 +106,6 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   if hasData:
     result.storage.syncRecordCount(maxId + 1)
 
-  # Rebuild reverse edge index from graph
   let idCount = result.storage.recordCount
   for id in 0'u64 ..< idCount:
     let node = result.storage.getHnswNodePtr(id)

@@ -1,3 +1,8 @@
+## Memory entity.
+## Represents a stored memory with ID, content, relevance score,
+## and timestamp.
+
+
 type
   Memory* = object
     id*: uint64

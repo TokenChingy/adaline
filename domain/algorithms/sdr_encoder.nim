@@ -1,11 +1,15 @@
+## Sparse Distributed Representation (SDR) encoder.
+## Converts text into a 10,240-bit fingerprint using three blocks:
+## tokens (50% weight), character-bigrams (25% weight), and
+## XOR-context features (25% weight). Probe counts are scaled by
+## IDF-squared so rare terms receive more active bits.
+
+
 import ../entities/fingerprint
 import ../entities/config
 import corpus_index
 import std/strutils
 
-# --- Deterministic locality-preserving hash ---
-# Each feature maps deterministically to bit positions.
-# Multiple probes use different seeds so a single feature can set >1 bit.
 proc hashFeature*(feature: string; seed: uint64 = 0): uint64 =
   var h = seed
   for c in feature:
@@ -18,8 +22,9 @@ proc hashFeature*(feature: string; seed: uint64 = 0): uint64 =
   result = h
 
 proc probeBlock*(fp: var Fingerprint; feature: string; count, baseBit, sizeBits: int) =
+  let h0 = hashFeature(feature, 0)
   for i in 0 ..< count:
-    let h = hashFeature(feature, uint64(i))
+    let h = h0 + uint64(i) * 0x9e3779b97f4a7c15'u64
     let pos = int(h mod uint64(sizeBits)) + baseBit
     setBit(fp, pos)
 
@@ -29,7 +34,6 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
 
   let probeMult = if isQuery: cfg.queryProbeMultiplier else: 1.0
 
-  # --- Block A: Tokens ---
   var tokens: seq[string] = @[]
   for token in normalised.split(AllChars - Letters - Digits):
     if token.len > 0:
@@ -39,7 +43,6 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
     let baseN = scaledProbes(index, token, cfg.tokenProbes)
     let n = max(1, int(float(baseN) * probeMult))
     probeBlock(result, token, n, 0, cfg.tokenBits)
-    # Prefix/suffix features for morphological robustness
     if token.len >= 4:
       let prefix = token[0..3]
       let suffix = token[^4..^1]
@@ -48,14 +51,12 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
       probeBlock(result, prefix, np, 0, cfg.tokenBits)
       probeBlock(result, suffix, ns, 0, cfg.tokenBits)
 
-  # --- Token bigrams in token block ---
   for i in 0 ..< tokens.len - 1:
     let bigram = tokens[i] & "_" & tokens[i + 1]
     let baseN = scaledProbes(index, bigram, cfg.tokenBigramProbes)
     let n = max(1, int(float(baseN) * probeMult))
     probeBlock(result, bigram, n, 0, cfg.tokenBits)
 
-  # --- Block B: Character bigrams ---
   if normalised.len >= 2:
     for i in 0 ..< normalised.len - 1:
       let bg = normalised[i ..< i + 2]
@@ -64,7 +65,6 @@ proc encodeSdr*(text: string; cfg: EngineConfig; index: CorpusIndex = CorpusInde
         let n = max(1, int(float(baseN) * probeMult))
         probeBlock(result, bg, n, cfg.tokenBits, cfg.bigramBits)
 
-  # --- Block C: XOR Bounded Neighbors ---
   if tokens.len >= 2:
     var tokenHashes = newSeq[uint64](tokens.len)
     for i in 0 ..< tokens.len:

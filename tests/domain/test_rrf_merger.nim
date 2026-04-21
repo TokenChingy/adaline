@@ -1,3 +1,6 @@
+## Unit tests for RRF merger algorithm.
+
+
 import unittest
 import ../../domain/algorithms/rrf_merger
 

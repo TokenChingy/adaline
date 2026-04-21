@@ -1,3 +1,8 @@
+## Lexical inverted index with Query Likelihood Model.
+## Tokenizes text on non-alphanumeric boundaries, builds postings lists,
+## and scores queries using QLM with Dirichlet smoothing.
+
+
 import std/[tables, strutils, math, algorithm]
 
 type
@@ -54,7 +59,6 @@ proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memor
   let qTokens = tokenize(query)
   var docScores = initTable[uint64, float]()
 
-  # Accumulate per-memory term contributions by iterating postings directly
   for token in qTokens:
     let corpusFreq = index.corpusTermFreqs.getOrDefault(token, 0'u64)
     if corpusFreq == 0 or index.totalCorpusTokens == 0:
@@ -66,7 +70,6 @@ proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memor
       for (mid, freq) in index.postings[token]:
         docScores[mid] = docScores.getOrDefault(mid, 0.0) + ln(1.0 + float(freq) / denominator)
 
-  # Apply length normalization and collect results
   var scored = newSeq[tuple[score: float, memoryId: uint64]]()
   let queryLen = float(qTokens.len)
   for mid, termScore in docScores:
@@ -85,9 +88,6 @@ proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memor
   for i in 0 ..< topK:
     result[i] = (scored[i].memoryId, scored[i].score)
 
-# ---------------------------------------------------------------------------
-# Serialization (flat binary)
-# ---------------------------------------------------------------------------
 
 proc saveLexical*(index: LexicalIndex; path: string; walOffset: uint64 = 0) =
   var f = open(path, fmWrite)

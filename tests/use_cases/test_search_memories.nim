@@ -1,3 +1,6 @@
+## Unit tests for Search Memories use case.
+
+
 import unittest
 import std/[strutils, os]
 import ../../domain/services/memory/init

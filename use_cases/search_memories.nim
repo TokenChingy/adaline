@@ -1,3 +1,8 @@
+## Search memories use case.
+## Input/output port for searching memories by query text.
+## Delegates to the domain search service.
+
+
 import ../domain/services/memory/search
 import ../domain/entities/memory
 

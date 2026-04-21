@@ -1,12 +1,18 @@
+## Vision / dense-vector benchmark using the proper dense-vector use-cases.
+## Loads CIFAR-10 CNN features from benchmarks/data/cifar10_features.bin
+## and benchmarks classification, few-shot scaling, incremental class addition,
+## and open-set detection via insertDense / searchDense.
+
 import std/[os, strutils, times, math, random, bitops]
-import ../domain/services/memory_service
+import ../domain/services/memory/types
+import ../domain/services/memory/init
+import ../domain/services/memory/insert_dense
+import ../domain/services/memory/search_dense
 import ../domain/entities/config
 import ../domain/entities/fingerprint
-import ../domain/algorithms/dense_encoder
-import ../domain/algorithms/fingerprint_lsh
-import ../domain/algorithms/hnsw_graph
-# import ../domain/algorithms/weighted_jaccard  # not used directly
 import ../infrastructure/mmapped_storage
+import ../use_cases/insert_dense
+import ../use_cases/search_dense
 
 const
   FeatureFilePath = "benchmarks/data/cifar10_features.bin"
@@ -23,70 +29,6 @@ type
     nTest: int
     featDim: int
     nClasses: int
-
-proc generateSyntheticDataset(nClasses: int = 10; featDim: int = 1280;
-                               nTrainPerClass: int = 100; nTestPerClass: int = 50;
-                               seed: int = 42): FeatureDataset =
-  ## Generate a synthetic structured dataset in pure Nim.
-  ##
-  ## Class centroids are random L2-normalised vectors.  Samples are centroid +
-  ## Gaussian noise, then re-normalised.  This gives enough structure for
-  ## nearest-neighbour retrieval to work, without any Python dependency.
-  var rng = initRand(seed)
-  result.nClasses = nClasses
-  result.featDim = featDim
-  result.nTrain = nClasses * nTrainPerClass
-  result.nTest = nClasses * nTestPerClass
-
-  # Generate class centroids
-  var centroids = newSeq[seq[float32]](nClasses)
-  for c in 0 ..< nClasses:
-    var v = newSeq[float32](featDim)
-    var norm = 0.0'f32
-    for j in 0 ..< featDim:
-      v[j] = float32(rng.rand(2.0) - 1.0)
-      norm += v[j] * v[j]
-    norm = sqrt(norm)
-    if norm > 1e-8:
-      for j in 0 ..< featDim:
-        v[j] = v[j] / norm
-    centroids[c] = v
-
-  # Training samples
-  result.trainFeatures = newSeq[float32](result.nTrain * featDim)
-  result.trainLabels = newSeq[uint32](result.nTrain)
-  for c in 0 ..< nClasses:
-    for i in 0 ..< nTrainPerClass:
-      let idx = c * nTrainPerClass + i
-      result.trainLabels[idx] = uint32(c)
-      let offset = idx * featDim
-      var norm = 0.0'f32
-      for j in 0 ..< featDim:
-        var val = centroids[c][j] + float32(rng.rand(1.0) - 0.5) * 0.6'f32
-        result.trainFeatures[offset + j] = val
-        norm += val * val
-      norm = sqrt(norm)
-      if norm > 1e-8:
-        for j in 0 ..< featDim:
-          result.trainFeatures[offset + j] = result.trainFeatures[offset + j] / norm
-
-  # Test samples
-  result.testFeatures = newSeq[float32](result.nTest * featDim)
-  result.testLabels = newSeq[uint32](result.nTest)
-  for c in 0 ..< nClasses:
-    for i in 0 ..< nTestPerClass:
-      let idx = c * nTestPerClass + i
-      result.testLabels[idx] = uint32(c)
-      let offset = idx * featDim
-      var norm = 0.0'f32
-      for j in 0 ..< featDim:
-        var val = centroids[c][j] + float32(rng.rand(1.0) - 0.5) * 0.6'f32
-        result.testFeatures[offset + j] = val
-        norm += val * val
-      norm = sqrt(norm)
-      if norm > 1e-8:
-        for j in 0 ..< featDim:
-          result.testFeatures[offset + j] = result.testFeatures[offset + j] / norm
 
 proc loadFeatureFile(path: string): FeatureDataset =
   if not fileExists(path):
@@ -142,8 +84,6 @@ proc loadFeatureFile(path: string): FeatureDataset =
   if f.readBuffer(addr result.testLabels[0], testLabelBytes) != testLabelBytes:
     raise newException(IOError, "Failed to read test labels")
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-
 proc getFeatureVec(ds: FeatureDataset; idx: int): seq[float32] =
   let offset = idx * ds.featDim
   result = ds.trainFeatures[offset ..< offset + ds.featDim]
@@ -154,41 +94,14 @@ proc getTestVec(ds: FeatureDataset; idx: int): seq[float32] =
 
 proc insertVector(service: var MemoryService; vec: openArray[float32];
                   labels: var seq[int]; label: int): uint64 =
-  let id = service.storage.allocId()
-  let fp = encodeDense(vec, service.cfg)
-  service.storage.writeFingerprintUnsafe(id, fp)
-  insertLsh(service.lsh, addr fp, id)
-  insertHnsw(service.storage.graphMem, service.storage.fpMem, id, addr fp,
-             service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-             service.hnswReverseIndex)
+  let id = insertDense(service, InsertDenseInput(vec: @vec)).memoryId
   if int(id) >= labels.len:
     labels.setLen(int(id) + 1)
   labels[int(id)] = label
   result = id
 
 proc searchVector(service: var MemoryService; vec: openArray[float32]; k: int): seq[tuple[memoryId: uint64, score: float]] =
-  let qfp = encodeDense(vec, service.cfg)
-  let seeds = queryLsh(service.lsh, addr qfp)
-  if service.hnswEntryPoint != 0 or seeds.len > 0:
-    result = searchHnsw(service.storage.graphMem, service.storage.fpMem,
-                        seeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
-
-proc fpPopcount(fp: ptr Fingerprint): int =
-  for i in 0 ..< FingerprintSegments:
-    result += popcount(fp.bits[i])
-
-# ─── Benchmark internals ─────────────────────────────────────────────────────
-
-proc aggregateClassSims(results: seq[tuple[memoryId: uint64, score: float]];
-                        labels: seq[int]; nClasses: int): seq[float] =
-  result = newSeq[float](nClasses)
-  for i in 0 ..< nClasses:
-    result[i] = -1.0
-  for (mid, score) in results:
-    let lbl = labels[int(mid)]
-    if lbl >= 0 and lbl < nClasses:
-      if score > result[lbl]:
-        result[lbl] = score
+  result = searchDense(service, SearchDenseInput(vec: @vec, topK: k)).results
 
 proc top1Accuracy(predictions, truth: seq[int]): float =
   var correct = 0
@@ -208,8 +121,6 @@ proc auroc(posScores, negScores: seq[float]): float =
       elif p == n: ties += 1.0
   return (count + 0.5 * ties) / float(posScores.len * negScores.len)
 
-# ─── Build class-index tables once ───────────────────────────────────────────
-
 proc buildClassIndices(labels: seq[uint32]; nClasses: int): seq[seq[int]] =
   result = newSeq[seq[int]](nClasses)
   for i in 0 ..< labels.len:
@@ -217,55 +128,12 @@ proc buildClassIndices(labels: seq[uint32]; nClasses: int): seq[seq[int]] =
     if c < nClasses:
       result[c].add(i)
 
-# ─── Benchmarks ──────────────────────────────────────────────────────────────
-
-proc benchFootprint(ds: FeatureDataset; cfg: EngineConfig) =
-  echo "\n=== Benchmark 1: footprint (memory comparison) ===\n"
-  let denseBytes = ds.featDim * 4
-  echo "  Input dimension : ", ds.featDim
-  echo "  Fingerprint size: ", cfg.fingerprintBits, " bits = ", cfg.fingerprintBytes, " bytes"
-  echo "  Dense storage   : ", ds.featDim, " dims x 4 bytes = ", denseBytes, " bytes/vector\n"
-
-  echo "  Encoder          Active bits    Sparse bytes    Ratio"
-  echo "  -------------------------------------------------------"
-
-  var rng = initRand(42)
-  var sampleVecs = newSeq[seq[float32]](50)
-  for i in 0 ..< 50:
-    var v = newSeq[float32](ds.featDim)
-    var norm = 0.0'f32
-    for j in 0 ..< ds.featDim:
-      v[j] = float32(rng.rand(2.0) - 1.0)
-      norm += v[j] * v[j]
-    norm = sqrt(norm)
-    if norm > 1e-8:
-      for j in 0 ..< ds.featDim:
-        v[j] = v[j] / norm
-    sampleVecs[i] = v
-
-  var totalBits = 0
-  for v in sampleVecs:
-    let fp = encodeDense(v, cfg)
-    totalBits += fpPopcount(addr fp)
-  let avgBits = float(totalBits) / float(sampleVecs.len)
-  let sparseBytes = avgBits * 2.0
-  let ratio = float(denseBytes) / max(sparseBytes, 1.0)
-
-  echo "  kwta_k128        ", formatFloat(avgBits, ffDecimal, 1).align(11),
-       " ", formatFloat(sparseBytes, ffDecimal, 0).align(13),
-       " ", formatFloat(ratio, ffDecimal, 1).align(6), "x"
-  echo "\n  Sparse bytes assumes uint16 active-bit position list."
-  echo "  Adaline stores fingerprints as packed bit arrays (",
-       cfg.fingerprintBytes, " bytes each — fixed width)."
-
-
 proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 50; seed: int = 42) =
-  echo "\n=== Benchmark 2: classify (1-shot, ", nQueryPerClass, " queries/class) ===\n"
+  echo "\n=== Benchmark 1: classify (1-shot, ", nQueryPerClass, " queries/class) ===\n"
   var rng = initRand(seed)
   let trainClassIdx = buildClassIndices(ds.trainLabels, ds.nClasses)
   let testClassIdx  = buildClassIndices(ds.testLabels,  ds.nClasses)
 
-  # Dense baseline: store prototype vectors and compute dot products
   var protoVectors: seq[seq[float32]]
   var protoLabels: seq[int]
   for c in 0 ..< ds.nClasses:
@@ -274,7 +142,6 @@ proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 
       protoVectors.add(getFeatureVec(ds, chosen))
       protoLabels.add(c)
 
-  # Select queries
   var queries: seq[seq[float32]]
   var truth: seq[int]
   for c in 0 ..< ds.nClasses:
@@ -285,7 +152,6 @@ proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 
       queries.add(getTestVec(ds, idxCopy[i]))
       truth.add(c)
 
-  # Dense retrieval (cosine = dot product, vectors are L2-normalised)
   var densePreds = newSeq[int](queries.len)
   let tDense = cpuTime()
   for qi, qvec in queries:
@@ -301,7 +167,6 @@ proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 
     densePreds[qi] = bestLabel
   let msDense = (cpuTime() - tDense) * 1000.0 / float(queries.len)
 
-  # Sparse retrieval via Adaline engine
   var benchDir = getCurrentDir() / "benchmarks" / "data" / "vision_classify"
   removeDir(benchDir)
   var service = initMemoryService(benchDir, cfg)
@@ -313,12 +178,19 @@ proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 
   let tSparse = cpuTime()
   for qi, qvec in queries:
     let res = searchVector(service, qvec, ds.nClasses)
-    let classSims = aggregateClassSims(res, labels, ds.nClasses)
+    var classBest = newSeq[float](ds.nClasses)
+    for i in 0 ..< ds.nClasses:
+      classBest[i] = -1.0
+    for (mid, score) in res:
+      let lbl = labels[int(mid)]
+      if lbl >= 0 and lbl < ds.nClasses:
+        if score > classBest[lbl]:
+          classBest[lbl] = score
     var bestLabel = 0
-    var bestScore = classSims[0]
+    var bestScore = classBest[0]
     for c in 1 ..< ds.nClasses:
-      if classSims[c] > bestScore:
-        bestScore = classSims[c]
+      if classBest[c] > bestScore:
+        bestScore = classBest[c]
         bestLabel = c
     sparsePreds[qi] = bestLabel
   let msSparse = (cpuTime() - tSparse) * 1000.0 / float(queries.len)
@@ -332,7 +204,7 @@ proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 
 proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
                   shots: seq[int] = @[1, 2, 5, 10, 20];
                   nQueryPerClass: int = 50; seed: int = 42) =
-  echo "\n=== Benchmark 3: fewshot (accuracy vs prototype count) ===\n"
+  echo "\n=== Benchmark 2: fewshot (accuracy vs prototype count) ===\n"
   var rng = initRand(seed)
   let trainClassIdx = buildClassIndices(ds.trainLabels, ds.nClasses)
   let testClassIdx  = buildClassIndices(ds.testLabels,  ds.nClasses)
@@ -350,7 +222,6 @@ proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
   echo "  Shots     dense       sparse (HNSW)"
   echo "  -----------------------------------"
   for nProto in shots:
-    # Dense baseline
     var denseProtos: seq[seq[float32]]
     var denseLabels: seq[int]
     for c in 0 ..< ds.nClasses:
@@ -374,7 +245,6 @@ proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
           bestLabel = denseLabels[pi]
       densePreds[qi] = bestLabel
 
-    # Sparse baseline
     var benchDir = getCurrentDir() / "benchmarks" / "data" / ("vision_fewshot_" & $nProto)
     removeDir(benchDir)
     var service = initMemoryService(benchDir, cfg)
@@ -389,12 +259,19 @@ proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
     var sparsePreds = newSeq[int](queries.len)
     for qi, qvec in queries:
       let res = searchVector(service, qvec, ds.nClasses)
-      let classSims = aggregateClassSims(res, labels, ds.nClasses)
+      var classBest = newSeq[float](ds.nClasses)
+      for i in 0 ..< ds.nClasses:
+        classBest[i] = -1.0
+      for (mid, score) in res:
+        let lbl = labels[int(mid)]
+        if lbl >= 0 and lbl < ds.nClasses:
+          if score > classBest[lbl]:
+            classBest[lbl] = score
       var bestLabel = 0
-      var bestScore = classSims[0]
+      var bestScore = classBest[0]
       for c in 1 ..< ds.nClasses:
-        if classSims[c] > bestScore:
-          bestScore = classSims[c]
+        if classBest[c] > bestScore:
+          bestScore = classBest[c]
           bestLabel = c
       sparsePreds[qi] = bestLabel
 
@@ -406,7 +283,7 @@ proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
 proc benchIncremental(ds: FeatureDataset; cfg: EngineConfig;
                       nProto: int = 5; nQueryPerClass: int = 50;
                       steps: seq[int] = @[2, 4, 6, 8, 10]; seed: int = 42) =
-  echo "\n=== Benchmark 4: incremental (", nProto, " prototypes/class, ", nQueryPerClass,
+  echo "\n=== Benchmark 3: incremental (", nProto, " prototypes/class, ", nQueryPerClass,
        " queries/class, classes ", steps[0], "->", steps[^1], ") ===\n"
   var rng = initRand(seed)
   let trainClassIdx = buildClassIndices(ds.trainLabels, ds.nClasses)
@@ -426,7 +303,6 @@ proc benchIncremental(ds: FeatureDataset; cfg: EngineConfig;
         queries.add(getTestVec(ds, idxCopy[i]))
         truth.add(c)
 
-    # Dense baseline
     var denseProtos: seq[seq[float32]]
     var denseLabels: seq[int]
     for c in 0 ..< nCls:
@@ -452,7 +328,6 @@ proc benchIncremental(ds: FeatureDataset; cfg: EngineConfig;
       densePreds[qi] = bestLabel
     discard (cpuTime() - tDense) * 1000.0 / float(queries.len)
 
-    # Sparse baseline
     var benchDir = getCurrentDir() / "benchmarks" / "data" / ("vision_inc_" & $nCls)
     removeDir(benchDir)
     var service = initMemoryService(benchDir, cfg)
@@ -468,12 +343,19 @@ proc benchIncremental(ds: FeatureDataset; cfg: EngineConfig;
     let tSparse = cpuTime()
     for qi, qvec in queries:
       let res = searchVector(service, qvec, nCls)
-      let classSims = aggregateClassSims(res, labels, nCls)
+      var classBest = newSeq[float](nCls)
+      for i in 0 ..< nCls:
+        classBest[i] = -1.0
+      for (mid, score) in res:
+        let lbl = labels[int(mid)]
+        if lbl >= 0 and lbl < nCls:
+          if score > classBest[lbl]:
+            classBest[lbl] = score
       var bestLabel = 0
-      var bestScore = classSims[0]
+      var bestScore = classBest[0]
       for c in 1 ..< nCls:
-        if classSims[c] > bestScore:
-          bestScore = classSims[c]
+        if classBest[c] > bestScore:
+          bestScore = classBest[c]
           bestLabel = c
       sparsePreds[qi] = bestLabel
     let msSparse = (cpuTime() - tSparse) * 1000.0 / float(queries.len)
@@ -487,12 +369,11 @@ proc benchIncremental(ds: FeatureDataset; cfg: EngineConfig;
 proc benchOpenset(ds: FeatureDataset; cfg: EngineConfig;
                   nKnown: int = 6; nProto: int = 5;
                   nQueryPerClass: int = 50; seed: int = 42) =
-  echo "\n=== Benchmark 5: openset (enrol ", nKnown, " classes, query all ", ds.nClasses, ") ===\n"
+  echo "\n=== Benchmark 4: openset (enrol ", nKnown, " classes, query all ", ds.nClasses, ") ===\n"
   var rng = initRand(seed)
   let trainClassIdx = buildClassIndices(ds.trainLabels, ds.nClasses)
   let testClassIdx  = buildClassIndices(ds.testLabels,  ds.nClasses)
 
-  # Dense baseline
   var denseProtos: seq[seq[float32]]
   var denseLabels: seq[int]
   for c in 0 ..< nKnown:
@@ -534,7 +415,6 @@ proc benchOpenset(ds: FeatureDataset; cfg: EngineConfig;
     else:
       denseNeg.add(bestScore)
 
-  # Sparse baseline
   var benchDir = getCurrentDir() / "benchmarks" / "data" / "vision_openset"
   removeDir(benchDir)
   var service = initMemoryService(benchDir, cfg)
@@ -550,12 +430,19 @@ proc benchOpenset(ds: FeatureDataset; cfg: EngineConfig;
   var sparseKnownPreds, sparseKnownTruth: seq[int]
   for qi, qvec in queries:
     let res = searchVector(service, qvec, nKnown)
-    let classSims = aggregateClassSims(res, labels, nKnown)
-    var bestScore = classSims[0]
+    var classBest = newSeq[float](nKnown)
+    for i in 0 ..< nKnown:
+      classBest[i] = -1.0
+    for (mid, score) in res:
+      let lbl = labels[int(mid)]
+      if lbl >= 0 and lbl < nKnown:
+        if score > classBest[lbl]:
+          classBest[lbl] = score
+    var bestScore = classBest[0]
     var bestLabel = 0
     for c in 1 ..< nKnown:
-      if classSims[c] > bestScore:
-        bestScore = classSims[c]
+      if classBest[c] > bestScore:
+        bestScore = classBest[c]
         bestLabel = c
     if isKnown[qi]:
       sparsePos.add(bestScore)
@@ -578,26 +465,67 @@ proc benchOpenset(ds: FeatureDataset; cfg: EngineConfig;
        "   ", formatFloat(sparseKnownAcc * 100, ffDecimal, 1).align(5), "%"
 
 
-# ─── CLI ─────────────────────────────────────────────────────────────────────
+proc benchFootprint(ds: FeatureDataset; cfg: EngineConfig) =
+  echo "\n=== Benchmark 5: footprint (memory comparison) ===\n"
+  let denseBytes = ds.featDim * 4
+  echo "  Input dimension : ", ds.featDim
+  echo "  Fingerprint size: ", cfg.fingerprintBits, " bits = ", cfg.fingerprintBytes, " bytes"
+  echo "  Dense storage   : ", ds.featDim, " dims x 4 bytes = ", denseBytes, " bytes/vector\n"
+
+  echo "  Encoder          Active bits    Sparse bytes    Ratio"
+  echo "  -------------------------------------------------------"
+
+  var rng = initRand(42)
+  var sampleVecs = newSeq[seq[float32]](50)
+  for i in 0 ..< 50:
+    var v = newSeq[float32](ds.featDim)
+    var norm = 0.0'f32
+    for j in 0 ..< ds.featDim:
+      v[j] = float32(rng.rand(2.0) - 1.0)
+      norm += v[j] * v[j]
+    norm = sqrt(norm)
+    if norm > 1e-8:
+      for j in 0 ..< ds.featDim:
+        v[j] = v[j] / norm
+    sampleVecs[i] = v
+
+  var service = initMemoryService(getCurrentDir() / "benchmarks" / "data" / "vision_footprint", defaultEngineConfig())
+  var totalBits = 0
+  for v in sampleVecs:
+    let id = insertDense(service, InsertDenseInput(vec: v)).memoryId
+    let fpPtr = service.storage.getFingerprintPtr(id)
+    var bits = 0
+    for i in 0 ..< FingerprintSegments:
+      bits += popcount(fpPtr.bits[i])
+    totalBits += bits
+  let avgBits = float(totalBits) / float(sampleVecs.len)
+  let sparseBytes = avgBits * 2.0
+  let ratio = float(denseBytes) / max(sparseBytes, 1.0)
+
+  echo "  kwta_k128        ", formatFloat(avgBits, ffDecimal, 1).align(11),
+       " ", formatFloat(sparseBytes, ffDecimal, 0).align(13),
+       " ", formatFloat(ratio, ffDecimal, 1).align(6), "x"
+  echo "\n  Sparse bytes assumes uint16 active-bit position list."
+  echo "  Adaline stores fingerprints as packed bit arrays (",
+       cfg.fingerprintBytes, " bytes each — fixed width)."
+
 
 proc printUsage() =
   echo """
 Adaline Vision Benchmark (Nim)
 
-Demonstrates dense-vector -> sparse-fingerprint retrieval through the
-actual Adaline engine (HNSW + LSH).
+Uses the proper dense-vector use-cases (insertDense, searchDense)
+to benchmark retrieval through the actual Adaline engine.
 
 Usage:
-  vision <feature-file>
-  vision --synthetic
+  vision_bench <feature-file>
 
 Options:
-  --synthetic   Generate a synthetic dataset in-memory (no Python needed).
-                Useful for smoke-testing the benchmark pipeline.
+  --help        Show this help message.
 
 Real features (requires Python + PyTorch):
   python3 benchmarks/dump_features.py
-  vision benchmarks/data/cifar10_features.bin
+  vision_bench benchmarks/data/cifar10_features.bin
 """
 
 proc main() =
@@ -607,11 +535,7 @@ proc main() =
     return
 
   var ds: FeatureDataset
-  var useSynthetic = false
-
-  if args.len > 0 and args[0] == "--synthetic":
-    useSynthetic = true
-  elif args.len > 0:
+  if args.len > 0:
     echo "Loading feature file: ", args[0]
     ds = loadFeatureFile(args[0])
   else:
@@ -619,12 +543,9 @@ proc main() =
       echo "Loading feature file: ", FeatureFilePath
       ds = loadFeatureFile(FeatureFilePath)
     else:
-      echo "No feature file found. Using synthetic data (--synthetic)."
-      useSynthetic = true
-
-  if useSynthetic:
-    echo "Generating synthetic dataset..."
-    ds = generateSyntheticDataset()
+      echo "No feature file found. Generate it with:"
+      echo "  python3 benchmarks/dump_features.py"
+      quit(1)
 
   echo "Train: ", ds.nTrain, " x ", ds.featDim, "-dim"
   echo "Test:  ", ds.nTest,  " x ", ds.featDim, "-dim"

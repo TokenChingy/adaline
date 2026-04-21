@@ -6,6 +6,10 @@ Demonstrates Adaline's sparse-fingerprint retrieval on non-NLP inputs
 (CIFAR-10 / pretrained CNN features).  Each benchmark includes a dense
 cosine-similarity baseline to show how much the sparse encoding preserves.
 
+When the Adaline Python bindings are compiled, pass --engine to also
+benchmark the actual Nim HNSW+LSH search path (O(log N) instead of
+brute-force Jaccard).
+
 Requirements:
     pip install torch torchvision numpy
 
@@ -18,9 +22,12 @@ Usage:
     python benchmark.py --dataset cifar10 --benchmark all
     python benchmark.py --dataset cifar10 --benchmark all --backbone resnet50
     python benchmark.py --dataset imagenet --benchmark comparison --backbone resnet50
+    python benchmark.py --dataset cifar10 --benchmark classify --engine
 """
 import argparse
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,6 +41,13 @@ from dense_encoder import (
     jaccard_query, fp_popcount,
     FINGERPRINT_BITS, FINGERPRINT_SEGMENTS,
 )
+
+# Optional: Adaline Python bindings (compiled from bindings/adaline.nim)
+try:
+    import adaline
+    _HAS_ADALINE = True
+except Exception:
+    _HAS_ADALINE = False
 
 CIFAR10_CLASSES = [
     'airplane', 'automobile', 'bird', 'cat', 'deer',
@@ -114,6 +128,71 @@ def auroc(pos_scores: np.ndarray, neg_scores: np.ndarray) -> float:
     return (count + 0.5 * ties) / (len(pos) * len(neg))
 
 
+# ─── Adaline Engine wrapper (optional) ───────────────────────────────────────
+
+class AdalineEngineWrapper:
+    """Wraps the compiled Nim Engine for dense-vector insert/search."""
+
+    def __init__(self, data_dir: str | None = None):
+        if not _HAS_ADALINE:
+            raise RuntimeError(
+                "Adaline Python bindings not found. "
+                "Compile with: nimble python"
+            )
+        self.dir = data_dir or tempfile.mkdtemp(prefix="adaline_vision_")
+        self.engine = adaline.Engine(self.dir)
+        self.id_to_label: dict[int, int] = {}
+
+    def insert_prototypes(self, proto_feats: np.ndarray, proto_labels: np.ndarray):
+        """Insert prototype vectors and remember their labels."""
+        for vec, lbl in zip(proto_feats, proto_labels):
+            mid = self.engine.insert_dense(vec.tolist())
+            self.id_to_label[int(mid)] = int(lbl)
+
+    def search(self, query_feats: np.ndarray, k: int) -> tuple:
+        """Search by dense vector; return (preds, all_scores, ms_per_q)."""
+        t0 = time.perf_counter()
+        preds, all_scores = [], []
+        for vec in query_feats:
+            hits = self.engine.search_dense(vec.tolist(), k)
+            # Aggregate per-class max scores
+            class_best: dict[int, float] = {}
+            for hit in hits:
+                lbl = self.id_to_label.get(int(hit.id), -1)
+                if lbl >= 0:
+                    class_best[lbl] = max(class_best.get(lbl, -1.0), hit.score)
+            if class_best:
+                best_lbl = max(class_best, key=class_best.get)
+                preds.append(best_lbl)
+                all_scores.append(class_best)
+            else:
+                preds.append(0)
+                all_scores.append({})
+        ms_per_q = (time.perf_counter() - t0) * 1000 / len(query_feats)
+        return np.array(preds), all_scores, ms_per_q
+
+    def class_sims_array(self, all_scores: list, n_classes: int) -> np.ndarray:
+        """Convert list of dicts to (Q, C) array."""
+        arr = np.full((len(all_scores), n_classes), -1.0, dtype=np.float32)
+        for i, d in enumerate(all_scores):
+            for c, s in d.items():
+                if 0 <= c < n_classes:
+                    arr[i, c] = s
+        return arr
+
+    def close(self):
+        if hasattr(self, 'engine'):
+            del self.engine
+        if self.dir.startswith(tempfile.gettempdir()):
+            shutil.rmtree(self.dir, ignore_errors=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
 # ─── Retrieval functions ─────────────────────────────────────────────────────
 
 def dense_retrieve(query_feats: np.ndarray,
@@ -141,10 +220,23 @@ def sparse_retrieve(query_fps: np.ndarray,
     return np.array(preds), np.stack(sims_list), ms_per_q
 
 
+def engine_retrieve(query_feats: np.ndarray,
+                    proto_feats: np.ndarray,
+                    proto_labels: np.ndarray,
+                    n_classes: int) -> tuple:
+    """Top-1 NN via actual Adaline Engine (HNSW+LSH)."""
+    with AdalineEngineWrapper() as eng:
+        eng.insert_prototypes(proto_feats, proto_labels)
+        preds, all_scores, ms_per_q = eng.search(query_feats, n_classes)
+        class_sims = eng.class_sims_array(all_scores, n_classes)
+    return preds, class_sims, ms_per_q
+
+
 # ─── Benchmark 1: classify ───────────────────────────────────────────────────
 
 def bench_classify(tr_feats, tr_labels, te_feats, te_labels,
-                   encoders, n_query: int = 50, seed: int = 0):
+                   encoders, use_engine: bool = False,
+                   n_query: int = 50, seed: int = 0):
     print('\n=== Benchmark 1: classify (1-shot, 50 queries/class) ===\n')
     rng = np.random.default_rng(seed)
     proto_feats, proto_labels = select_prototypes(
@@ -152,11 +244,21 @@ def bench_classify(tr_feats, tr_labels, te_feats, te_labels,
     query_feats, query_labels = select_queries(
         te_feats, get_class_indices(te_labels), n_query, rng)
 
-    print(f"  {'Method':<22} {'Accuracy':>10} {'ms/query':>10}")
-    print('  ' + '-' * 46)
+    methods = ['dense (cosine)']
+    if use_engine:
+        methods.append('sparse (engine)')
+    methods.extend([enc.name for enc in encoders])
+
+    col_w = max(22, max(len(m) for m in methods) + 2)
+    print(f"  {'Method':<{col_w}} {'Accuracy':>10} {'ms/query':>10}")
+    print('  ' + '-' * (col_w + 22))
 
     pred, _, ms = dense_retrieve(query_feats, proto_feats, proto_labels)
-    print(f"  {'dense (cosine)':<22} {accuracy(pred, query_labels):>9.1%} {ms:>10.3f}")
+    print(f"  {'dense (cosine)':<{col_w}} {accuracy(pred, query_labels):>9.1%} {ms:>10.3f}")
+
+    if use_engine:
+        pred, _, ms = engine_retrieve(query_feats, proto_feats, proto_labels, len(np.unique(tr_labels)))
+        print(f"  {'sparse (engine)':<{col_w}} {accuracy(pred, query_labels):>9.1%} {ms:>10.3f}")
 
     for enc in encoders:
         t0 = time.perf_counter()
@@ -164,13 +266,14 @@ def bench_classify(tr_feats, tr_labels, te_feats, te_labels,
         query_fps = enc.encode_batch(query_feats)
         pred, _, _ = sparse_retrieve(query_fps, proto_fps, proto_labels)
         ms = (time.perf_counter() - t0) * 1000 / len(query_feats)
-        print(f"  {enc.name:<22} {accuracy(pred, query_labels):>9.1%} {ms:>10.3f}")
+        print(f"  {enc.name:<{col_w}} {accuracy(pred, query_labels):>9.1%} {ms:>10.3f}")
 
 
 # ─── Benchmark 2: fewshot ────────────────────────────────────────────────────
 
 def bench_fewshot(tr_feats, tr_labels, te_feats, te_labels,
-                  encoders, shots=(1, 2, 5, 10, 20),
+                  encoders, use_engine: bool = False,
+                  shots=(1, 2, 5, 10, 20),
                   n_query: int = 50, seed: int = 0):
     print('\n=== Benchmark 2: fewshot (accuracy vs prototype count) ===\n')
     rng = np.random.default_rng(seed)
@@ -180,6 +283,8 @@ def bench_fewshot(tr_feats, tr_labels, te_feats, te_labels,
         te_feats, class_idx_te, n_query, rng)
 
     methods = ['dense'] + [enc.name for enc in encoders]
+    if use_engine:
+        methods.insert(1, 'engine')
     header = f"  {'Shots':<8}" + ''.join(f"{m:>16}" for m in methods)
     print(header)
     print('  ' + '-' * (8 + 16 * len(methods)))
@@ -190,6 +295,10 @@ def bench_fewshot(tr_feats, tr_labels, te_feats, te_labels,
         pred, _, _ = dense_retrieve(query_feats, proto_feats, proto_labels)
         row = f"  {n_proto:<8}{accuracy(pred, query_labels):>15.1%}"
 
+        if use_engine:
+            pred, _, _ = engine_retrieve(query_feats, proto_feats, proto_labels, len(class_idx_tr))
+            row += f"{accuracy(pred, query_labels):>16.1%}"
+
         for enc in encoders:
             proto_fps = enc.encode_batch(proto_feats)
             query_fps = enc.encode_batch(query_feats)
@@ -198,14 +307,17 @@ def bench_fewshot(tr_feats, tr_labels, te_feats, te_labels,
         print(row)
 
     print()
-    print('  Adeline showcase: accuracy should improve rapidly with more prototypes')
+    print('  Adaline showcase: accuracy should improve rapidly with more prototypes')
     print('  and the sparse encoders should stay within a few % of dense.')
+    if use_engine:
+        print('  The engine column uses the actual Nim HNSW+LSH index (O(log N) search).')
 
 
 # ─── Benchmark 3: incremental ────────────────────────────────────────────────
 
 def bench_incremental(tr_feats, tr_labels, te_feats, te_labels,
-                      encoders, n_proto: int = 5, n_query: int = 50,
+                      encoders, use_engine: bool = False,
+                      n_proto: int = 5, n_query: int = 50,
                       steps: list = None, top_ks: tuple = (1,), seed: int = 0):
     """Incremental class-addition benchmark with configurable steps and top-k metrics.
 
@@ -225,6 +337,8 @@ def bench_incremental(tr_feats, tr_labels, te_feats, te_labels,
     class_idx_tr = get_class_indices(tr_labels, n_total)
     class_idx_te = get_class_indices(te_labels, n_total)
     methods = ['dense'] + [enc.name for enc in encoders]
+    if use_engine:
+        methods.insert(1, 'engine')
 
     # Collect (class_sims (Q,C), ms_per_q) per method per step
     step_results = {}
@@ -244,6 +358,16 @@ def bench_incremental(tr_feats, tr_labels, te_feats, te_labels,
         cs = aggregate_class_sims(sims, pl, n_cls)
         ms = (time.perf_counter() - t0) * 1000 / len(qf)
         step_results[n_cls]['dense'] = (cs, ms)
+
+        # Engine
+        if use_engine:
+            t0 = time.perf_counter()
+            with AdalineEngineWrapper() as eng:
+                eng.insert_prototypes(pf, pl)
+                _, all_scores, _ = eng.search(qf, n_cls)
+                cs = eng.class_sims_array(all_scores, n_cls)
+            ms = (time.perf_counter() - t0) * 1000 / len(qf)
+            step_results[n_cls]['engine'] = (cs, ms)
 
         # Sparse encoders
         for enc in encoders:
@@ -281,12 +405,16 @@ def bench_incremental(tr_feats, tr_labels, te_feats, te_labels,
     print()
     print('  Key insight: accuracy should degrade gracefully as classes grow')
     print('  with no retraining — and sparse encoders should track dense closely.')
+    if use_engine:
+        print('  Engine uses real HNSW+LSH (O(log N) search); pure-Python')
+        print('  encoders use brute-force Jaccard (O(N) scan).')
 
 
 # ─── Benchmark 4: openset ────────────────────────────────────────────────────
 
 def bench_openset(tr_feats, tr_labels, te_feats, te_labels,
-                  encoders, n_known: int = 6, n_proto: int = 5,
+                  encoders, use_engine: bool = False,
+                  n_known: int = 6, n_proto: int = 5,
                   n_query: int = 50, seed: int = 0):
     print(f'\n=== Benchmark 4: openset (enrol {n_known} classes, query all 10) ===\n')
     rng = np.random.default_rng(seed)
@@ -303,20 +431,46 @@ def bench_openset(tr_feats, tr_labels, te_feats, te_labels,
 
     print(f"  Known classes: {list(known)}  ({is_known.sum()} known queries, "
           f"{(~is_known).sum()} novel queries)\n")
-    print(f"  {'Method':<22} {'AUROC':>7} {'Known acc':>10} {'Known score':>12} {'Novel score':>12}")
-    print('  ' + '-' * 67)
+
+    methods = ['dense (cosine)'] + [enc.name for enc in encoders]
+    if use_engine:
+        methods.insert(1, 'sparse (engine)')
+
+    col_w = max(22, max(len(m) for m in methods) + 2)
+    print(f"  {'Method':<{col_w}} {'AUROC':>7} {'Known acc':>10} {'Known score':>12} {'Novel score':>12}")
+    print('  ' + '-' * (col_w + 45))
 
     def report(name: str, scores: np.ndarray, preds: np.ndarray):
         auc = auroc(scores[is_known], scores[~is_known])
         kc  = accuracy(preds[is_known], query_labels[is_known])
         mk  = float(scores[is_known].mean())
         mn  = float(scores[~is_known].mean())
-        print(f"  {name:<22} {auc:>7.3f} {kc:>9.1%} {mk:>12.4f} {mn:>12.4f}")
+        print(f"  {name:<{col_w}} {auc:>7.3f} {kc:>9.1%} {mk:>12.4f} {mn:>12.4f}")
 
     sims = query_feats @ proto_feats.T
     report('dense (cosine)',
            sims.max(axis=1),
            proto_labels[sims.argmax(axis=1)])
+
+    if use_engine:
+        with AdalineEngineWrapper() as eng:
+            eng.insert_prototypes(proto_feats, proto_labels)
+            all_scores, all_preds = [], []
+            for vec in query_feats:
+                hits = eng.engine.search_dense(vec.tolist(), n_known)
+                class_best = {}
+                for hit in hits:
+                    lbl = eng.id_to_label.get(int(hit.id), -1)
+                    if lbl >= 0:
+                        class_best[lbl] = max(class_best.get(lbl, -1.0), hit.score)
+                if class_best:
+                    best = max(class_best, key=class_best.get)
+                    all_scores.append(class_best[best])
+                    all_preds.append(best)
+                else:
+                    all_scores.append(0.0)
+                    all_preds.append(0)
+            report('sparse (engine)', np.array(all_scores), np.array(all_preds))
 
     for enc in encoders:
         proto_fps = enc.encode_batch(proto_feats)
@@ -597,6 +751,9 @@ def main():
                    help='Directory for cached extracted features')
     p.add_argument('--n-train-per-class', type=int, default=20,
                    help='ImageNet only: training images sampled per class for prototypes')
+    p.add_argument('--engine', action='store_true',
+                   help='Also benchmark the compiled Adaline Engine (HNSW+LSH) '
+                        'via Python bindings. Requires: nimble python')
     p.add_argument('--seed', type=int, default=42)
     args = p.parse_args()
 
@@ -609,6 +766,13 @@ def main():
         print('Note: defaulting to resnet50 for ImageNet (pass --backbone to override)')
 
     print(f'Adaline Vision Benchmark  —  {args.dataset.upper()} / {backbone}')
+    if args.engine:
+        if _HAS_ADALINE:
+            print('Engine mode: ON  (using compiled Nim HNSW+LSH index)')
+        else:
+            print('WARNING: --engine requested but Adaline bindings not found.')
+            print('         Compile with: nimble python')
+            print('         Falling back to pure-Python benchmarks only.')
     print('=' * 60)
 
     # SRP needs a (10240 × dim) matrix: skip for ImageNet where dim=2048 (80 MB)
@@ -620,6 +784,7 @@ def main():
 
     feat_dim = BACKBONE_DIMS[backbone]
     bm = args.benchmark
+    use_engine = args.engine and _HAS_ADALINE
 
     if bm in ('footprint', 'all'):
         bench_footprint(feat_dim, encoders)
@@ -652,18 +817,18 @@ def main():
 
         if bm in ('classify', 'all') and not is_imagenet:
             bench_classify(tr_feats, tr_labels, te_feats, te_labels,
-                           encoders, seed=args.seed)
+                           encoders, use_engine=use_engine, seed=args.seed)
         if bm in ('fewshot', 'all') and not is_imagenet:
             bench_fewshot(tr_feats, tr_labels, te_feats, te_labels,
-                          encoders, seed=args.seed)
+                          encoders, use_engine=use_engine, seed=args.seed)
         if bm in ('incremental', 'all'):
             bench_incremental(tr_feats, tr_labels, te_feats, te_labels,
-                              encoders, n_query=inc_nquery,
+                              encoders, use_engine=use_engine, n_query=inc_nquery,
                               steps=inc_steps, top_ks=inc_top_ks,
                               seed=args.seed)
         if bm in ('openset', 'all') and not is_imagenet:
             bench_openset(tr_feats, tr_labels, te_feats, te_labels,
-                          encoders, seed=args.seed)
+                          encoders, use_engine=use_engine, seed=args.seed)
         if bm == 'comparison':
             bench_resnet_comparison(
                 tr_feats, tr_labels, te_feats, te_labels,

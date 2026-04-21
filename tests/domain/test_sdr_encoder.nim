@@ -1,3 +1,6 @@
+## Unit tests for SDR encoder algorithm.
+
+
 import unittest
 import std/bitops
 import ../../domain/entities/fingerprint
