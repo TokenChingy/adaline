@@ -21,6 +21,18 @@ nimble benchmark
 
 Datasets auto-download on first run and cache in `benchmarks/<name>/`.
 
+### Ablation Benchmark (semantic / lexical / combined)
+
+The ablation benchmark isolates each search lane:
+
+```bash
+nim c -d:release -o:benchmarks/ablation benchmarks/ablation.nim
+./benchmarks/ablation scifact all       # run semantic, lexical, combined
+./benchmarks/ablation scifact semantic  # semantic lane only
+./benchmarks/ablation scifact lexical   # lexical lane only
+./benchmarks/ablation scifact combined  # both lanes with RRF
+```
+
 ### LongMemEval
 
 ```bash
@@ -47,7 +59,9 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 5,183 documents. 1,109 queries (300 with qrels).
 
-### Indexing
+### Baseline (master)
+
+#### Indexing
 
 | Statistic | Value |
 |-----------|-------|
@@ -57,7 +71,7 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 | P95 latency | 0.74 ms |
 | P99 latency | 1.17 ms |
 
-### Query (top-100)
+#### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
@@ -67,13 +81,13 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 | P95 latency | 5.74 ms |
 | P99 latency | 7.03 ms |
 
-### Retrieval Quality (300 judged queries)
+#### Retrieval Quality (300 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 43.47% |
-| Recall@5 | 63.28% |
-| Recall@10 | 72.07% |
+| Recall@1 | 42.81% |
+| Recall@5 | 63.44% |
+| Recall@10 | 72.57% |
 | Recall@100 | 86.49% |
 | Precision@1 | 44.67% |
 | Precision@5 | 13.53% |
@@ -81,24 +95,82 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 | Precision@100 | 1.05% |
 | MRR | 0.5475 |
 | MAP | 0.5371 |
-| nDCG@10 | 0.5794 |
+| nDCG@10 | 0.5796 |
 
-### CRUD Throughput (on already-indexed SciFact)
+### After bug fixes (`fix/combined-bugs`)
 
-| Operation | Count | Total | Throughput | P50 | P95 |
-|-----------|-------|-------|------------|-----|-----|
-| Delete | 1,000 | 0.78 s | 1,282 docs/s | 0.84 ms | 1.52 ms |
-| Update | 1,000 | 0.83 s | 1,200 docs/s | 0.84 ms | 1.44 ms |
+#### Indexing
 
-Delete/update speed varies with graph density; sparser graphs heal faster.
+| Statistic | Value |
+|-----------|-------|
+| Total time | 157.98 s |
+| Throughput | 32.81 docs/s |
+| P50 latency | 26.89 ms |
+| P95 latency | 65.94 ms |
+| P99 latency | 90.76 ms |
 
-### Notes
+> **Note:** Insertion is slower because the fixed `searchLayer` explores more candidates during `efConstruction=200`, building a higher-quality graph.
 
-- P50 query latency is ~4.5 ms for top-100 semantic+lexical fusion.
-- Term-coverage reranker contributes significantly — without it, nDCG@10 was ~0.36 in earlier experiments.
-- Lowering `rrfK` from 60 to 10 improved SciFact nDCG@10 by ~0.02 (sharper rank discrimination).
-- Memory footprint: ~6.5 MB for fingerprints plus a few MB for in-memory indexes.
-- SciFact documents are short; most do not trigger chunking.
+#### Query (top-100)
+
+| Statistic | Value |
+|-----------|-------|
+| Total time | 24.28 s |
+| Throughput | 45.68 q/s |
+| P50 latency | 21.28 ms |
+| P95 latency | 29.60 ms |
+| P99 latency | 32.68 ms |
+
+#### Retrieval Quality (300 judged queries)
+
+| Metric | Value |
+|--------|-------|
+| Recall@1 | 45.81% |
+| Recall@5 | 64.69% |
+| Recall@10 | 71.42% |
+| Recall@100 | 87.57% |
+| Precision@1 | 47.00% |
+| Precision@5 | 13.93% |
+| Precision@10 | 7.80% |
+| Precision@100 | 1.09% |
+| MRR | 0.5626 |
+| MAP | 0.5521 |
+| nDCG@10 | 0.5891 |
+
+### Ablation Breakdown (SciFact)
+
+| Branch | Lane | R@1 | R@5 | R@10 | R@100 | nDCG@10 |
+|--------|------|-----|-----|------|-------|---------|
+| **baseline** | semantic | 4.11% | 4.94% | 5.06% | 5.22% | 0.0467 |
+| **baseline** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **baseline** | combined | 42.58% | 63.36% | 71.90% | 86.82% | 0.5745 |
+| **searchlayer-bug** | semantic | 31.14% | 45.31% | 48.83% | 53.54% | 0.4063 |
+| **searchlayer-bug** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **searchlayer-bug** | combined | 44.47% | 65.36% | 71.58% | 87.91% | 0.5816 |
+| **lsh-coverage** | semantic | 12.42% | 16.17% | 17.50% | 19.61% | 0.1531 |
+| **lsh-coverage** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **lsh-coverage** | combined | 42.58% | 63.36% | 71.90% | 86.82% | 0.5745 |
+| **combined-bugs** | semantic | 33.97% | 49.08% | 53.28% | 58.98% | 0.4404 |
+| **combined-bugs** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **combined-bugs** | combined | 45.47% | 65.36% | 71.42% | 87.57% | 0.5889 |
+| **hash-weyl-fixed** | semantic | 32.47% | 47.67% | 53.06% | 60.53% | 0.4302 |
+| **hash-weyl-fixed** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **hash-weyl-fixed** | combined | 45.72% | 64.53% | 72.33% | 88.47% | 0.5938 |
+| **hnsw-layer-p-fixed** | semantic | 32.97% | 47.92% | 52.11% | 57.73% | 0.4291 |
+| **hnsw-layer-p-fixed** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **hnsw-layer-p-fixed** | combined | 45.14% | 65.03% | 71.42% | 87.57% | 0.5863 |
+| **all-fixes** | semantic | 32.47% | 48.67% | 54.39% | 61.93% | 0.4369 |
+| **all-fixes** | lexical | 43.25% | 64.19% | 73.57% | 88.19% | 0.5870 |
+| **all-fixes** | combined | 45.39% | 64.19% | 72.40% | 88.41% | 0.5922 |
+
+### Key Findings (SciFact)
+
+1. **The `searchLayer` early-termination bug is the single largest issue.** Fixing it raises semantic R@100 from **5.2% → 53.5%** and combined nDCG@10 from **0.5745 → 0.5816**.
+2. **LSH coverage matters.** With the default 50 bands × 2 rows, 37.5% of the fingerprint (the entire context block + tail of bigrams) is invisible to LSH. Raising `lshBands` to 80 so that `80 × 2 = 160` covers all segments adds another **~5.4 points** of semantic R@100 on top of the bug fix.
+3. **Weyl-sequence probes (`hash-weyl`) give a small combined boost.** Changing `probeBlock` from sequential seeds to a Weyl sequence improves combined nDCG@10 to **0.5938** (best overall), but slightly reduces semantic precision@1/5 compared to `combined-bugs` alone.
+4. **Standard HNSW layer distribution (`mL = 1/ln(M)`) hurts sparse SDRs.** The dense hierarchy (`p = 0.5`) works better for Jaccard-based sparse fingerprints than the standard sparse hierarchy.
+5. **Diversity-aware neighbor pruning hurts and is very slow.** The standard HNSW `selectNeighbors` heuristic is designed for dense Euclidean/inner-product spaces. For sparse Jaccard fingerprints, simple distance-based truncation outperforms it.
+6. **Lexical lane dominates SciFact.** Even with all fixes, lexical-only (88.2% R@100, 0.587 nDCG@10) outperforms semantic-only (60.5% R@100, 0.430 nDCG@10). The semantic lane is still valuable for paraphrase/semantic-neighbor retrieval, but on short scientific abstracts with heavy lexical overlap, QLM carries most of the signal.
 
 ---
 
@@ -106,7 +178,9 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 
 3,633 documents. 3,237 queries (323 with qrels).
 
-### Indexing
+### Baseline (master)
+
+#### Indexing
 
 | Statistic | Value |
 |-----------|-------|
@@ -116,7 +190,7 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 | P95 latency | 0.63 ms |
 | P99 latency | 0.90 ms |
 
-### Query (top-100)
+#### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
@@ -126,7 +200,7 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 | P95 latency | 3.80 ms |
 | P99 latency | 4.21 ms |
 
-### Retrieval Quality (323 judged queries)
+#### Retrieval Quality (323 judged queries)
 
 | Metric | Value |
 |--------|-------|
@@ -142,12 +216,21 @@ Delete/update speed varies with graph density; sparser graphs heal faster.
 | MAP | 0.1256 |
 | nDCG@10 | 0.2791 |
 
-### Notes
+### After bug fixes (`fix/combined-bugs`)
 
-- Medical literature with sparse relevance judgments and longer, more lexically diverse documents.
-- Low recall because the task is passage retrieval from long abstracts with very few labeled positives per query.
-- Query throughput is higher than SciFact because the corpus is smaller. HNSW search time scales sub-linearly with corpus size.
-- Some medical abstracts are long enough to trigger chunking.
+#### Ablation Breakdown (NFCorpus)
+
+| Lane | R@1 | R@5 | R@10 | R@100 | nDCG@10 |
+|------|-----|-----|------|-------|---------|
+| semantic | 2.24% | 5.15% | 6.46% | 10.38% | 0.1685 |
+| lexical | 5.50% | 11.32% | 13.33% | 22.85% | 0.2817 |
+| combined | 4.96% | 11.22% | 13.18% | 22.27% | 0.2701 |
+
+### Key Findings (NFCorpus)
+
+1. **Semantic path improves dramatically** with bug fixes: nDCG@10 goes from **0.0728 → 0.1685** (+131%).
+2. **Combined system is slightly below lexical-only** on this dataset (0.2701 vs 0.2817). Sparse relevance judgments and medical vocabulary mean the semantic lane's broader recall sometimes introduces noise into the RRF merge.
+3. **Query speed drops** with the bug fixes because `searchLayer` now explores more candidates (as intended). Semantic-only P50 latency goes from 7.1 ms → 10.3 ms.
 
 ---
 

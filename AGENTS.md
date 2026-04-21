@@ -64,6 +64,47 @@ Use Cases ← Domain ← Infrastructure
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
 - **Python bindings:** `bindings/adaline.nim` exposes `Engine` (insert, search, update, delete, stats, checkpoint) via nimpy. Build with `nimble python`.
 
+## Semantic Path Diagnostics
+
+The following issues were discovered and fixed during a systematic ablation study (see `BENCHMARK.md` for full numbers). The branches below exist in this repo for reference.
+
+### Critical: `searchLayer` early-termination bug
+
+**File:** `domain/algorithms/hnsw_graph.nim`  
+**Fix:** `results.len > 0` → `results.len >= ef`
+
+The original code broke the best-first search **even when the result buffer was not full** (`results.len < ef`). This caused premature stopping during both insertion (`efConstruction=200`) and query (`efSearch=64`). The bug destroyed graph navigability: with `ef=1` during greedy upper-layer descent, the loop stopped after exploring a single neighbor.
+
+**Impact on SciFact semantic path:** R@100 rose from **5.2% → 53.5%** after this fix alone.
+
+### Critical: LSH ignored 37.5% of the fingerprint
+
+**File:** `domain/entities/config.nim`  
+**Fix:** `lshBands: 50` → `lshBands: 80`
+
+With the default config (`lshBands=50`, `lshRows=2`), only segments 0..99 of the 160 uint64 segments were hashed by `bandHash`. The entire XOR-context block (segments 112..159) and the tail of the bigram block (segments 100..111) were invisible to LSH candidate generation.
+
+**Impact:** Raising `lshBands` to 80 covers all 160 segments and adds **~5 points** of semantic R@100 on top of the bug fix.
+
+### Safety: dangling entry point after delete
+
+**File:** `domain/services/memory/delete.nim`  
+**Fix:** After deleting chunks, scan remaining nodes and update `hnswEntryPoint` / `maxHnswLayer` if the entry point was removed.
+
+Without this fix, a search after deleting the entry-point node dereferences a freed/reused slot.
+
+### Tested but NOT recommended
+
+| Experiment | Branch | Result |
+|------------|--------|--------|
+| **Weyl-sequence probes** | `exp/hash-weyl-fixed` | Marginal combined nDCG@10 gain (+0.005 over `combined-bugs`), but changes fingerprint generation (breaks existing indexes). |
+| **Standard HNSW layer distribution (`mL = 1/ln(M)`)** | `exp/hnsw-layer-p-fixed` | **Hurts** semantic recall. The dense hierarchy (`p=0.5`) works better for sparse Jaccard fingerprints than the standard sparse hierarchy. |
+| **Diversity-aware neighbor pruning** | `exp/diversity-heuristic` | **Hurts** semantic recall and is **~10× slower** at insertion. The standard HNSW `selectNeighbors` heuristic is designed for dense Euclidean spaces; simple distance truncation is superior for sparse SDRs. |
+
+### Recommended branch
+
+`fix/combined-bugs` contains the three critical fixes (searchLayer, LSH coverage, entryPoint delete) without any of the experimental changes that break compatibility or hurt performance.
+
 ## Agent hygiene
 
 Before finishing any task:
