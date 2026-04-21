@@ -1,6 +1,8 @@
 import nimpy
 import std/tables
-import ../domain/services/memory_service
+import ../domain/services/memory/types
+import ../domain/services/memory/init
+import ../domain/services/memory/checkpoint
 import ../domain/entities/config
 import ../domain/entities/memory
 import ../use_cases/insert_memory

@@ -26,10 +26,9 @@ domain/algorithms/  <- The math:
                        - RRF merger
                        - Reranker (term-coverage boost)
                        - Chunker (conditional sentence-aware splitting)
-domain/services/    <- Pure domain orchestration. `memory_service.nim` is the umbrella
-                       re-export; each operation lives in `memory/` (types, init,
-                       insert, delete, update, search, checkpoint). Import the
-                       specific file when working on a single use case.
+domain/services/    <- Pure domain orchestration. Each operation lives in
+                       `memory/` (types, init, insert, delete, update, search,
+                       checkpoint). Import the specific file; no umbrella re-export.
  infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        graph store, chunks mapping store). Imported by domain
                        services when needed.

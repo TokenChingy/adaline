@@ -1,5 +1,10 @@
 import std/[os, strutils, json, times, tables, sequtils, algorithm]
-import ../domain/services/memory_service
+import ../domain/services/memory/types
+import ../domain/services/memory/init
+import ../domain/services/memory/insert
+import ../domain/services/memory/delete
+import ../domain/services/memory/update
+import ../domain/services/memory/search
 import ../domain/entities/config
 
 proc loadCorpus(dataDir: string): seq[tuple[id, text: string]] =

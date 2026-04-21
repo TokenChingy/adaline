@@ -38,7 +38,6 @@ task test, "Compile and run all tests":
     "tests/domain/test_config.nim",
     "tests/domain/test_memory.nim",
     "tests/domain/test_hnsw_graph.nim",
-    "tests/domain/test_memory_service.nim",
     "tests/use_cases/test_insert_memory.nim",
     "tests/use_cases/test_search_memories.nim",
     "tests/use_cases/test_update_memory.nim",

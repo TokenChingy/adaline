@@ -1,5 +1,8 @@
 import std/[os, strutils, json, times, tables, sets, sequtils, algorithm, math]
-import ../domain/services/memory_service
+import ../domain/services/memory/types
+import ../domain/services/memory/init
+import ../domain/services/memory/insert
+import ../domain/services/memory/search
 import ../domain/entities/config
 
 const

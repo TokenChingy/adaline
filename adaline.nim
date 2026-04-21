@@ -1,5 +1,6 @@
 import std/[os, strutils, tables, times]
-import domain/services/memory_service
+import domain/services/memory/types
+import domain/services/memory/init
 import domain/entities/config
 import domain/entities/memory
 import use_cases/insert_memory
