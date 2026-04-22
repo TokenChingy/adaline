@@ -35,9 +35,9 @@ type
     hnswMaxLayers: uint16
     hnswMaxNeighbors: uint16
 
-  FpIdxEntry = object
-    offset: uint32
-    size: uint32
+  FpIdxEntry* = object
+    offset*: uint32
+    size*: uint32
 
   MmappedStorage* = ref object
     dataDir*: string
