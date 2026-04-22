@@ -156,11 +156,12 @@ proc growFpIdx*(storage: MmappedStorage; minCount: uint64) =
   if minCount <= storage.fpIdxCapacity:
     return
   let idxPath = storage.dataDir / "fingerprints.idx"
-  let newCapacity = preallocateFile(idxPath, uint64(sizeof(FpIdxEntry)), minCount)
+  let newCapacity = minCount
+  let newSize = uint64(StoreHeaderSize) + newCapacity * uint64(sizeof(FpIdxEntry))
+  extendFile(idxPath, newSize)
 
   storage.fpIdxMemFile.close()
-  let newSize = StoreHeaderSize + int(newCapacity * uint64(sizeof(FpIdxEntry)))
-  storage.fpIdxMemFile = memfiles.open(idxPath, mode = fmReadWrite, mappedSize = newSize)
+  storage.fpIdxMemFile = memfiles.open(idxPath, mode = fmReadWrite, mappedSize = int(newSize))
   storage.fpIdxMem = cast[pointer](cast[uint](storage.fpIdxMemFile.mem) + uint(StoreHeaderSize))
   storage.fpIdxCapacity = newCapacity
 
@@ -213,15 +214,12 @@ proc initStorage*(dataDir: string; hnswMaxLayers, hnswMaxNeighbors: int): Mmappe
 
   if not fileExists(idxPath):
     var h = makeHeader(uint16(sizeof(FpIdxEntry)))
+    h.capacity = 1024
     var f = system.open(idxPath, fmReadWrite)
     writeHeader(f, h)
     f.close()
-    let initialSlots = preallocateFile(idxPath, uint64(sizeof(FpIdxEntry)), 1024)
-    var f2 = system.open(idxPath, fmReadWriteExisting)
-    var h2 = readHeader(f2)
-    h2.capacity = initialSlots
-    writeHeader(f2, h2)
-    f2.close()
+    let idxBytes = uint64(StoreHeaderSize) + 1024'u64 * uint64(sizeof(FpIdxEntry))
+    extendFile(idxPath, idxBytes)
 
   let idxSize = uint64(getFileSize(idxPath))
   result.fpIdxMemFile = memfiles.open(idxPath, mode = fmReadWrite, mappedSize = int(idxSize))
