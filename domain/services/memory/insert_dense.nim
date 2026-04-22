@@ -17,7 +17,8 @@ proc insertDense*(service: var MemoryService; vec: seq[float32]): uint64 =
   let fp = encodeDense(vec, service.cfg)
   service.storage.writeFingerprintUnsafe(id, fp)
   insertLsh(service.lsh, addr fp, id)
-  insertHnsw(service.storage.graphMem, service.storage.fpMem, id, addr fp,
-             service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
+  insertHnsw(service.storage.graphMem, readFingerprintWrapper,
+             addr service.storage, id, addr fp, service.cfg,
+             service.maxHnswLayer, service.hnswEntryPoint,
              service.hnswReverseIndex, service.storage.graphRecordSize)
   result = id

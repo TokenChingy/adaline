@@ -5,6 +5,7 @@
 
 
 import ./types
+import ../../entities/fingerprint
 import ../../entities/hnsw_node
 import ../../algorithms/fingerprint_lsh
 import ../../algorithms/lexical_index
@@ -54,8 +55,9 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
         service.hnswEntryPoint = newEp
         service.maxHnswLayer = newMaxLayer
 
-    let fpPtr = service.storage.getFingerprintPtr(chunkId)
-    removeLsh(service.lsh, fpPtr, chunkId)
+    var fp: Fingerprint
+    service.storage.readFingerprint(chunkId, addr fp)
+    removeLsh(service.lsh, addr fp, chunkId)
 
     let chunkText = if chunkId == parentId: content
                     else: service.textCache.getOrDefault(service.chunkToParent.getOrDefault(chunkId, chunkId), "")

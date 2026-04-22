@@ -12,6 +12,7 @@ import ../../algorithms/hnsw_graph
 import ../../algorithms/lexical_index
 import ../../algorithms/rrf_merger
 import ../../algorithms/reranker
+import ../../../infrastructure/mmapped_storage
 import std/[tables, algorithm]
 
 export types
@@ -23,8 +24,9 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   if service.cfg.semanticSearchEnabled:
     let lshSeeds = queryLsh(service.lsh, addr qfp)
     if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
-      semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
-                                   lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg,
+      semanticResults = searchHnsw(service.storage.graphMem, readFingerprintWrapper,
+                                   addr service.storage, lshSeeds,
+                                   service.hnswEntryPoint, addr qfp, k, service.cfg,
                                    service.storage.graphRecordSize)
 
   var lexicalResults = newSeq[tuple[memoryId: uint64, score: float]]()

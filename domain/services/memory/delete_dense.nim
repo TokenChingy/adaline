@@ -4,6 +4,7 @@
 
 
 import ./types
+import ../../entities/fingerprint
 import ../../entities/hnsw_node
 import ../../algorithms/fingerprint_lsh
 import ../../../infrastructure/mmapped_storage
@@ -45,7 +46,8 @@ proc deleteDense*(service: var MemoryService; memoryId: uint64) =
       service.hnswEntryPoint = newEp
       service.maxHnswLayer = newMaxLayer
 
-  let fpPtr = service.storage.getFingerprintPtr(memoryId)
-  removeLsh(service.lsh, fpPtr, memoryId)
+  var fp: Fingerprint
+  service.storage.readFingerprint(memoryId, addr fp)
+  removeLsh(service.lsh, addr fp, memoryId)
   service.storage.freeId(memoryId)
   service.storage.syncHeader()

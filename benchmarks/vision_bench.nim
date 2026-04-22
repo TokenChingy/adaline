@@ -493,10 +493,11 @@ proc benchFootprint(ds: FeatureDataset; cfg: EngineConfig) =
   var totalBits = 0
   for v in sampleVecs:
     let id = insertDense(service, InsertDenseInput(vec: v)).memoryId
-    let fpPtr = service.storage.getFingerprintPtr(id)
+    var fp: Fingerprint
+    service.storage.readFingerprint(id, addr fp)
     var bits = 0
     for i in 0 ..< FingerprintSegments:
-      bits += popcount(fpPtr.bits[i])
+      bits += popcount(fp.bits[i])
     totalBits += bits
   let avgBits = float(totalBits) / float(sampleVecs.len)
   let sparseBytes = avgBits * 2.0

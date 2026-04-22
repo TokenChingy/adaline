@@ -43,9 +43,9 @@ proc updateMemory*(service: var MemoryService; parentId: uint64; content: string
     storage.writeFingerprintUnsafe(chunkId, fp)
     insertLsh(service.lsh, addr fp, chunkId)
     addMemory(service.lexical, chunkId, content)
-    insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-               service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-               service.hnswReverseIndex, storage.graphRecordSize)
+    insertHnsw(storage.graphMem, readFingerprintWrapper, addr storage,
+               chunkId, addr fp, service.cfg, service.maxHnswLayer,
+               service.hnswEntryPoint, service.hnswReverseIndex, storage.graphRecordSize)
   else:
     for chunkText in chunks:
       let chunkId = storage.allocId()
@@ -56,6 +56,6 @@ proc updateMemory*(service: var MemoryService; parentId: uint64; content: string
       storage.writeFingerprintUnsafe(chunkId, fp)
       insertLsh(service.lsh, addr fp, chunkId)
       addMemory(service.lexical, chunkId, chunkText)
-      insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-                 service.hnswReverseIndex, storage.graphRecordSize)
+      insertHnsw(storage.graphMem, readFingerprintWrapper, addr storage,
+                 chunkId, addr fp, service.cfg, service.maxHnswLayer,
+                 service.hnswEntryPoint, service.hnswReverseIndex, storage.graphRecordSize)

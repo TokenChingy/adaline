@@ -41,9 +41,9 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
     addMemory(service.lexical, chunkId, content)
 
-    insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-               service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-               service.hnswReverseIndex, storage.graphRecordSize)
+    insertHnsw(storage.graphMem, readFingerprintWrapper, addr storage,
+               chunkId, addr fp, service.cfg, service.maxHnswLayer,
+               service.hnswEntryPoint, service.hnswReverseIndex, storage.graphRecordSize)
   else:
     for chunkText in chunks:
       let chunkId = storage.allocId()
@@ -57,8 +57,8 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
       addMemory(service.lexical, chunkId, chunkText)
 
-      insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
-                 service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-                 service.hnswReverseIndex, storage.graphRecordSize)
+      insertHnsw(storage.graphMem, readFingerprintWrapper, addr storage,
+                 chunkId, addr fp, service.cfg, service.maxHnswLayer,
+                 service.hnswEntryPoint, service.hnswReverseIndex, storage.graphRecordSize)
 
   result = parentId

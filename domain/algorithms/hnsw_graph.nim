@@ -3,8 +3,9 @@
 ## for sparse fingerprint vectors using weighted Jaccard distance.
 ## Includes layer assignment, edge wiring, and graph healing on delete.
 ##
-## This module now uses ``HnswNodeView`` so that the on-disk record size
-## can vary with the runtime ``hnswMaxLayers`` / ``hnswMaxNeighbors`` config.
+## The graph algorithm now receives fingerprints through an abstract
+## ``FingerprintReadFn`` callback so that the storage layer can compress
+## fingerprints on disk and decompress them on demand.
 
 
 import ../entities/fingerprint
@@ -13,20 +14,28 @@ import ../entities/config
 import weighted_jaccard
 import std/[heapqueue, sets, random, algorithm, tables, sequtils]
 
-proc getFingerprintPtr*(fpMem: pointer; memoryId: uint64): ptr Fingerprint {.inline.} =
-  let offset = memoryId * uint64(FingerprintBytes)
-  cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset)))
+## Callback type for reading a fingerprint by memory ID.
+type
+  FingerprintReadFn* = proc(ctx: pointer; memoryId: uint64; outFp: ptr Fingerprint) {.nimcall.}
+
+# Forward declarations for backward-compatible wrappers.
+proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: uint64;
+                  layer, ef: int; cfg: EngineConfig): seq[tuple[id: uint64, dist: float]]
+proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint;
+                 cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64;
+                 reverseIndex: var Table[uint64, seq[uint64]])
+proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint64;
+                 queryFp: ptr Fingerprint; k: int; cfg: EngineConfig): seq[tuple[memoryId: uint64, score: float]]
+
+# ---------------------------------------------------------------------------
+# Internal implementations using the abstract read callback.
+# ---------------------------------------------------------------------------
 
 proc getHnswNodeView*(graphMem: pointer; memoryId: uint64;
                       graphRecordSize: uint64; maxNeighbors: int): HnswNodeView {.inline.} =
   let offset = memoryId * graphRecordSize
   let p = cast[pointer](cast[uint](graphMem) + uint(offset))
   makeView(p, maxNeighbors, HnswMaxLayers)
-
-# Backward-compatible wrapper for tests that still use compile-time max size.
-proc getHnswNodePtr*(graphMem: pointer; memoryId: uint64): ptr HnswNode {.inline.} =
-  let offset = memoryId * uint64(sizeof(HnswNode))
-  cast[ptr HnswNode](cast[pointer](cast[uint](graphMem) + uint(offset)))
 
 proc randomLevel*(maxLayer: int): int =
   var lvl = 0
@@ -38,14 +47,16 @@ type
   MinItem = tuple[dist: float, id: uint64]
   MaxItem = tuple[negDist: float, id: uint64]
 
-proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: uint64;
+proc searchLayer*(graphMem: pointer; readFp: FingerprintReadFn; fpCtx: pointer;
+                  queryFp: ptr Fingerprint; entryId: uint64;
                   layer, ef: int; cfg: EngineConfig; graphRecordSize: uint64): seq[tuple[id: uint64, dist: float]] =
   var visited = initHashSet[uint64]()
   var candidates = initHeapQueue[MinItem]()
   var results = initHeapQueue[MaxItem]()
 
-  let entryPtr = getFingerprintPtr(fpMem, entryId)
-  let entryDist = 1.0 - weightedJaccard(queryFp, entryPtr, cfg)
+  var entryFp: Fingerprint
+  readFp(fpCtx, entryId, addr entryFp)
+  let entryDist = 1.0 - weightedJaccard(queryFp, addr entryFp, cfg)
   visited.incl(entryId)
   candidates.push((entryDist, entryId))
 
@@ -62,8 +73,9 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
     for nid in node.neighbors(layer):
       if nid notin visited:
         visited.incl(nid)
-        let nptr = getFingerprintPtr(fpMem, nid)
-        let ndist = 1.0 - weightedJaccard(queryFp, nptr, cfg)
+        var nfp: Fingerprint
+        readFp(fpCtx, nid, addr nfp)
+        let ndist = 1.0 - weightedJaccard(queryFp, addr nfp, cfg)
         if ndist < -results[0].negDist or results.len < ef:
           candidates.push((ndist, nid))
 
@@ -73,7 +85,8 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
     let (negDist, id) = results.pop()
     result[n - 1 - i] = (id, -negDist)
 
-proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint;
+proc insertHnsw*(graphMem: pointer; readFp: FingerprintReadFn; fpCtx: pointer;
+                 memoryId: uint64; fp: ptr Fingerprint;
                  cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64;
                  reverseIndex: var Table[uint64, seq[uint64]]; graphRecordSize: uint64) =
   let node = getHnswNodeView(graphMem, memoryId, graphRecordSize, cfg.hnswMaxNeighbors)
@@ -90,12 +103,12 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
 
   var currEp = entryPoint
   for lc in countdown(maxLayer, layer + 1):
-    let neighbors = searchLayer(graphMem, fpMem, fp, currEp, lc, 1, cfg, graphRecordSize)
+    let neighbors = searchLayer(graphMem, readFp, fpCtx, fp, currEp, lc, 1, cfg, graphRecordSize)
     if neighbors.len > 0:
       currEp = neighbors[0].id
 
   for lc in countdown(layer, 0):
-    let neighbors = searchLayer(graphMem, fpMem, fp, currEp, lc, cfg.hnswEfConstruction, cfg, graphRecordSize)
+    let neighbors = searchLayer(graphMem, readFp, fpCtx, fp, currEp, lc, cfg.hnswEfConstruction, cfg, graphRecordSize)
     var selected = newSeq[uint64]()
     for i in 0 ..< min(neighbors.len, cfg.hnswMaxNeighbors):
       selected.add(neighbors[i].id)
@@ -110,9 +123,9 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       for nnid in nnode.neighbors(lc):
         oldNeighbors.add(nnid)
 
-      let newDist = 1.0 - weightedJaccard(
-        getFingerprintPtr(fpMem, nid),
-        getFingerprintPtr(fpMem, memoryId), cfg)
+      var nidFp: Fingerprint
+      readFp(fpCtx, nid, addr nidFp)
+      let newDist = 1.0 - weightedJaccard(addr nidFp, fp, cfg)
 
       if oldNeighbors.len < cfg.hnswMaxNeighbors:
         oldNeighbors.add(memoryId)
@@ -126,9 +139,9 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       var worstDist = newDist
       var worstIdx = -1
       for i, nnid in oldNeighbors:
-        let d = 1.0 - weightedJaccard(
-          getFingerprintPtr(fpMem, nid),
-          getFingerprintPtr(fpMem, nnid), cfg)
+        var nnidFp: Fingerprint
+        readFp(fpCtx, nnid, addr nnidFp)
+        let d = 1.0 - weightedJaccard(addr nidFp, addr nnidFp, cfg)
         if d > worstDist:
           worstDist = d
           worstIdx = i
@@ -154,14 +167,16 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
     maxLayer = layer
     entryPoint = memoryId
 
-proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint64;
+proc searchHnsw*(graphMem: pointer; readFp: FingerprintReadFn; fpCtx: pointer;
+                 seeds: seq[uint64]; entryPoint: uint64;
                  queryFp: ptr Fingerprint; k: int; cfg: EngineConfig; graphRecordSize: uint64): seq[tuple[memoryId: uint64, score: float]] =
   var allResults = initTable[uint64, float]()
 
   for seed in seeds:
     if not allResults.hasKey(seed):
-      let sptr = getFingerprintPtr(fpMem, seed)
-      let score = weightedJaccard(queryFp, sptr, cfg)
+      var sfp: Fingerprint
+      readFp(fpCtx, seed, addr sfp)
+      let score = weightedJaccard(queryFp, addr sfp, cfg)
       allResults[seed] = score
 
   if entryPoint != 0:
@@ -170,11 +185,11 @@ proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint6
     var currEp = entryPoint
 
     for lc in countdown(maxLayer, 1):
-      let neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, lc, 1, cfg, graphRecordSize)
+      let neighbors = searchLayer(graphMem, readFp, fpCtx, queryFp, currEp, lc, 1, cfg, graphRecordSize)
       if neighbors.len > 0:
         currEp = neighbors[0].id
 
-    let layer0Neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, 0, cfg.hnswEfSearch, cfg, graphRecordSize)
+    let layer0Neighbors = searchLayer(graphMem, readFp, fpCtx, queryFp, currEp, 0, cfg.hnswEfSearch, cfg, graphRecordSize)
     for (nid, dist) in layer0Neighbors:
       let score = 1.0 - dist
       if not allResults.hasKey(nid) or score > allResults[nid]:
@@ -193,3 +208,30 @@ proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint6
   result = newSeq[tuple[memoryId: uint64, score: float]](topK)
   for i in 0 ..< topK:
     result[i] = (sorted[i].memoryId, sorted[i].score)
+
+# ---------------------------------------------------------------------------
+# Backward-compatible wrappers for unit tests using raw memory.
+# ---------------------------------------------------------------------------
+
+proc readFingerprintFromMem(ctx: pointer; memoryId: uint64; outFp: ptr Fingerprint) {.nimcall.} =
+  let offset = memoryId * uint64(FingerprintBytes)
+  let src = cast[pointer](cast[uint](ctx) + uint(offset))
+  copyMem(outFp, src, sizeof(Fingerprint))
+
+proc getHnswNodePtr*(graphMem: pointer; memoryId: uint64): ptr HnswNode {.inline.} =
+  let offset = memoryId * uint64(sizeof(HnswNode))
+  cast[ptr HnswNode](cast[pointer](cast[uint](graphMem) + uint(offset)))
+
+proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: uint64;
+                  layer, ef: int; cfg: EngineConfig): seq[tuple[id: uint64, dist: float]] =
+  searchLayer(graphMem, readFingerprintFromMem, fpMem, queryFp, entryId, layer, ef, cfg, uint64(sizeof(HnswNode)))
+
+proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint;
+                 cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64;
+                 reverseIndex: var Table[uint64, seq[uint64]]) =
+  insertHnsw(graphMem, readFingerprintFromMem, fpMem, memoryId, fp,
+             cfg, maxLayer, entryPoint, reverseIndex, uint64(sizeof(HnswNode)))
+
+proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint64;
+                 queryFp: ptr Fingerprint; k: int; cfg: EngineConfig): seq[tuple[memoryId: uint64, score: float]] =
+  searchHnsw(graphMem, readFingerprintFromMem, fpMem, seeds, entryPoint, queryFp, k, cfg, uint64(sizeof(HnswNode)))

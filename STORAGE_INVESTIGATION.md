@@ -67,6 +67,35 @@
 
 ---
 
+### H2: Fingerprint Compression ✅ PROTOTYPED
+**Hypothesis:** Eliding zero uint64 segments from the 1,280-byte fingerprint bitmap will cut fingerprint storage by ~50-60% with negligible search latency impact, since decompression is just a small memory copy.
+
+**Status:** Implemented on this branch. All tests pass.
+
+**Results:**
+- Text fingerprints: **465 bytes average** (down from 1,280 bytes)
+- **Compression ratio: ~2.75x**
+- **Space savings: ~63.6%** of `fingerprints.bin` footprint
+- Dense-vector fingerprints: ~874 bytes (still a 32% win)
+- Search, insert, delete, and update behaviour confirmed intact
+
+**Implementation notes:**
+- Added `compressFingerprint` / `decompressFingerprint` to `domain/entities/fingerprint.nim`
+- New storage layout:
+  - `fingerprints.bin`: append-only compressed data (256-byte header)
+  - `fingerprints.idx`: offset table `(offset: uint32, size: uint32)` per slot
+- `HnswNodeView`-style abstraction: `FingerprintReadFn` callback decouples graph algorithms from storage representation
+- Backward-compat `getHnswNodePtr` + raw-memory wrappers keep unit tests unchanged
+- Old `fingerprints.bin` without `.idx` companion is detected and rejected on init
+
+**Combined H1 + H2 savings at default config:**
+| File | Before | After | Savings |
+|------|--------|-------|---------|
+| graph.bin | 1,032 bytes/node | 520 bytes/node | ~49.6% |
+| fingerprints.bin | 1,280 bytes/fp | ~465 bytes/fp | ~63.6% |
+
+---
+
 ### H3: On-Demand Text Store (Paged / Slab)
 **Hypothesis:** Eliminating `textCache` by storing texts in a separate paged file and loading on demand during result materialization will dramatically reduce RAM usage, especially for large corpora.
 

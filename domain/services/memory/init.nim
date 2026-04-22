@@ -5,6 +5,7 @@
 
 import ./types
 import ../../entities/config
+import ../../entities/fingerprint
 import ../../entities/hnsw_node
 import ../../algorithms/fingerprint_lsh
 import ../../algorithms/lexical_index
@@ -91,8 +92,9 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
         let chunkId = effectiveChunkIds[i]
         let chunkText = chunkTexts[i]
         addMemory(result.lexical, chunkId, chunkText)
-        let fpPtr = result.storage.getFingerprintPtr(chunkId)
-        insertLsh(result.lsh, fpPtr, chunkId)
+        var fp: Fingerprint
+        result.storage.readFingerprint(chunkId, addr fp)
+        insertLsh(result.lsh, addr fp, chunkId)
 
     for i in 0 ..< numChunks:
       let chunkId = effectiveChunkIds[i]
