@@ -198,7 +198,7 @@ proc benchClassify(ds: FeatureDataset; cfg: EngineConfig; nQueryPerClass: int = 
   echo "  Method                Accuracy    ms/query"
   echo "  -----------------------------------------"
   echo "  dense (cosine)        ", formatFloat(top1Accuracy(densePreds, truth) * 100, ffDecimal, 1).align(6), "%     ", formatFloat(msDense, ffDecimal, 3)
-  echo "  sparse (HNSW)         ", formatFloat(top1Accuracy(sparsePreds, truth) * 100, ffDecimal, 1).align(6), "%     ", formatFloat(msSparse, ffDecimal, 3)
+  echo "  sparse (LSH)          ", formatFloat(top1Accuracy(sparsePreds, truth) * 100, ffDecimal, 1).align(6), "%     ", formatFloat(msSparse, ffDecimal, 3)
 
 
 proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
@@ -219,7 +219,7 @@ proc benchFewshot(ds: FeatureDataset; cfg: EngineConfig;
       queries.add(getTestVec(ds, idxCopy[i]))
       truth.add(c)
 
-  echo "  Shots     dense       sparse (HNSW)"
+  echo "  Shots     dense       sparse (LSH)"
   echo "  -----------------------------------"
   for nProto in shots:
     var denseProtos: seq[seq[float32]]
@@ -290,7 +290,7 @@ proc benchIncremental(ds: FeatureDataset; cfg: EngineConfig;
   let testClassIdx  = buildClassIndices(ds.testLabels,  ds.nClasses)
 
   echo "  Top-1 Accuracy:"
-  echo "  Classes    dense       sparse (HNSW)     ms/query"
+  echo "  Classes    dense       sparse (LSH)      ms/query"
   echo "  -------------------------------------------------"
   for nCls in steps:
     var queries: seq[seq[float32]]
@@ -461,7 +461,7 @@ proc benchOpenset(ds: FeatureDataset; cfg: EngineConfig;
   echo "  ----------------------------------------"
   echo "  dense (cosine)        ", formatFloat(denseAuc, ffDecimal, 3).align(6),
        "   ", formatFloat(denseKnownAcc * 100, ffDecimal, 1).align(5), "%"
-  echo "  sparse (HNSW)         ", formatFloat(sparseAuc, ffDecimal, 3).align(6),
+  echo "  sparse (LSH)          ", formatFloat(sparseAuc, ffDecimal, 3).align(6),
        "   ", formatFloat(sparseKnownAcc * 100, ffDecimal, 1).align(5), "%"
 
 

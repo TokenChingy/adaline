@@ -201,7 +201,7 @@ proc runBenchmark*(datasetName: string) =
   sort(queryTimes)
 
   echo "\n=== Benchmark Results: ", datasetName, " ==="
-  echo "\nFull Insert (storage + SDR + LSH + HNSW + Lexical):"
+  echo "\nFull Insert (storage + SDR + LSH + Lexical):"
   echo "  Total:     ", formatFloat(totalInsert, ffDecimal, 4), " s"
   echo "  Throughput:", formatFloat(float(corpus.len) / totalInsert, ffDecimal, 2), " docs/s"
   echo "  P50:       ", formatFloat(percentile(insertTimes, 0.5) * 1000, ffDecimal, 4), " ms"
@@ -238,6 +238,8 @@ Usage:
 Supported datasets:
   scifact   - Scientific fact verification (default, ~5K docs)
   nfcorpus  - NFCorpus medical literature (~3.6K docs)
+  arguana   - Argument retrieval (~8.7K docs)
+  fiqa      - Financial QA (~57K docs)
   msmarco   - MS MARCO passage retrieval (~8.8M docs, 1GB+ download)
 
 Examples:
@@ -253,6 +255,11 @@ proc main() =
   if datasetName in ["help", "--help", "-h"]:
     printUsage()
     return
+
+  if datasetName == "arguana":
+    if not dirExists("benchmarks/arguana"):
+      echo "Error: benchmarks/arguana/ not found"
+      return
 
   runBenchmark(datasetName)
 

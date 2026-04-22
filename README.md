@@ -1,6 +1,6 @@
 # Adaline
 
-A Nim-based vector search engine that converts text into **10,240-bit sparse fingerprints**. It utilizes a dual-lane retrieval architecture, running semantic search (HNSW + LSH) and lexical matching (Inverted Index + QLM) in parallel. Results are fused via Reciprocal Rank Fusion (RRF) and reranked by term coverage.
+A Nim-based vector search engine that converts text into **10,240-bit sparse fingerprints**. It utilizes a dual-lane retrieval architecture, running semantic search (LSH) and lexical matching (Inverted Index + QLM) in parallel. Results are fused via Reciprocal Rank Fusion (RRF) and reranked by term coverage.
 
 ---
 
@@ -38,25 +38,24 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
   |  XOR-context)    |
   +------------------+
       |
-      +------------------+------------------+
-      |                  |                  |
-      v                  v                  v
-  +--------+      +------------+      +-------------+
-  | LSH    |      | HNSW Graph |      | Lexical     |
-  | (80    |      | (layered   |      | Index (QLM  |
-  |  bands)|      |  greedy)   |      | + Dirichlet)|
-  +--------+      +------------+      +-------------+
-      |                  |                  |
-      v                  v                  v
-  lsh.bin          graph.bin          lexical.bin
+      +------------------+
+      |                  |
+      v                  v
+  +--------+      +-------------+
+  | LSH    |      | Lexical     |
+  | (80    |      | Index (QLM  |
+  |  bands)|      | + Dirichlet)|
+  +--------+      +-------------+
+      |                  |
+      v                  v
+  lsh.bin          lexical.bin
 ```
 
 1. **Allocate & Log:** `allocId()` fetches a slot from the freelist. The record `(memoryId, timestamp, textLen, text)` is appended to `wal.bin` and flushed instantly.
 2. **Dynamic Chunking:** The engine estimates saturation for the token, character-bigram, and XOR-context blocks. If any block hits the `chunkSaturationThreshold` (60%), the text is split on sentence boundaries with a one-sentence overlap.
 3. **Encoding:** Each chunk is encoded into a 10,240-bit fingerprint. Probe counts are scaled by IDF-squared (rare tokens get more probes; stopwords get fewer).
 4. **LSH Routing (Semantic):** The fingerprint is partitioned into 80 bands of 2 rows for GoldFinger-style direct banding, inserting the chunk into the `lsh.bin` buckets.
-5. **HNSW Routing (Semantic):** The chunk descends the `graph.bin` layers via greedy best-first search, wiring bidirectional edges pruned by weighted Jaccard distance.
-6. **Lexical Routing:** Text is tokenized on non-alphanumeric boundaries and added to the inverted index using Query Likelihood with Dirichlet smoothing ($\mu = 2000$).
+5. **Lexical Routing:** Text is tokenized on non-alphanumeric boundaries and added to the inverted index using Query Likelihood with Dirichlet smoothing ($\mu = 2000$).
 
 ### 2. Search & Retrieval (Text)
 
@@ -72,17 +71,17 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
       +----------+----------+
       |          |          |
       v          v          v
-  +--------+ +--------+ +--------+
-  | LSH    | | HNSW   | | Lexical|
-  | Seeds  | | Layer0 | | Index  |
-  +--------+ +--------+ +--------+
-      |          |          |
-      v          v          v
-  +--------+ +--------+ +--------+
-  | Weighted| | Beam   | | QLM    |
-  | Jaccard | | Search | | Score  |
-  +--------+ +--------+ +--------+
-      |          |          |
+  +--------+            +--------+
+  | LSH    |            | Lexical|
+  | Seeds  |            | Index  |
+  +--------+            +--------+
+      |                     |
+      v                     v
+  +---------+           +--------+
+  | Weighted|           | QLM    |
+  | Jaccard |           | Score  |
+  +---------+           +--------+
+      |                     |
       +----------+----------+
                  |
                  v
@@ -109,7 +108,7 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
 ```
 
 1. **Query Encoding:** The query is encoded with a `queryProbeMultiplier` of 2.0 to compensate for the sparsity of short queries.
-2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. These seeds are dropped into Layer 0 of the HNSW graph, triggering a beam search (`efSearch=64`). Candidates are scored using Weighted Jaccard.
+2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. Candidates are scored using brute-force Weighted Jaccard.
 3. **Lexical Lane:** Query tokens are concurrently routed through the inverted index and scored via QLM.
 4. **Fusion & Resolution:** Both lanes are merged using Reciprocal Rank Fusion (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
 5. **Rerank:** Top candidates receive a final term-coverage boost (`+ 0.5 * coverage`) to push exact matches to the top of the result list.
@@ -122,8 +121,8 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
       v
   +--------+     +------------------+
   | Delete |---->| Heal old chunks  |
-  | old    |     | (HNSW + LSH +    |
-  | chunks |     |  lexical purge)  |
+  | old    |     | (LSH + lexical   |
+  | chunks |     |  purge)          |
   +--------+     +------------------+
       |
       v
@@ -137,7 +136,7 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
   Same parent ID, fresh chunks
 ```
 
-Performs a logical atomic delete-then-insert. It calls the Delete workflow to wipe the old chunks and heal the graph, then appends a new WAL record and re-inserts the updated content, seamlessly mapping the fresh chunks back to the original parent ID.
+Performs a logical atomic delete-then-insert. It calls the Delete workflow to wipe the old chunks from LSH and lexical indexes, then appends a new WAL record and re-inserts the updated content, seamlessly mapping the fresh chunks back to the original parent ID.
 
 ### 4. Delete (Text)
 
@@ -152,28 +151,21 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
       |
       v
   +------------------+
-  | Heal Graph       |----> Reverse edge index
-  | (sever fwd/bwd)  |      heals neighbor lists
-  +------------------+
-      |
-      v
-  +------------------+
   | Purge Indexes    |----> Remove from LSH buckets
   +------------------+      Decrement lexical postings
       |
       v
   +------------------+
   | freeId()         |----> Zero fingerprint
-  +------------------+      Clear HNSW node
-      |                     Push to freelist
+  +------------------+      Push to freelist
+      |
       v
    syncHeader()
 ```
 
 1. **Collect:** Identify all chunk IDs associated with the target parent ID.
-2. **Heal Graph:** For each chunk, sever forward edges and backward edges. An in-memory reverse edge index is used to remove the chunk from all predecessors' neighbor lists without a full graph rebuild.
-3. **Purge Indexes:** Remove the chunk from the LSH buckets and decrement its term frequencies from the lexical postings.
-4. **Free ID:** Zero out the graph node and push the slot back to the `mmap` freelist.
+2. **Purge Indexes:** Remove the chunk from the LSH buckets and decrement its term frequencies from the lexical postings.
+3. **Free ID:** Zero out the fingerprint and push the slot back to the `mmap` freelist.
 
 ### 5. Vision / Dense-Vector Insert
 
@@ -196,16 +188,16 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
       +----------+----------+
       |          |          |
       v          v          v
-  +--------+ +--------+  (no lexical
-  | LSH    | | HNSW   |   index for
-  | Insert | | Insert |   dense vectors)
-  +--------+ +--------+
-      |          |
-      v          v
-  lsh.bin   graph.bin
+  +--------+  +-------------+  (no lexical
+  | LSH    |  | Fingerprint |   index for
+  | Insert |  | Store       |   dense vectors)
+  +--------+  +-------------+
+      |
+      v
+  lsh.bin
 ```
 
-Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` use-case encodes a float32 vector directly to a fingerprint and inserts into LSH and HNSW.
+Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` use-case encodes a float32 vector directly to a fingerprint and inserts into LSH.
 
 ### 6. Vision / Dense-Vector Search
 
@@ -225,12 +217,12 @@ Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` us
   +------------------+
       |
       v
-  +--------+     +--------+
-  | LSH    |---->| HNSW   |
-  | Seeds  |     | Layer0 |
-  +--------+     +--------+
-      |              |
-      v              v
+  +--------+
+  | LSH    |
+  | Seeds  |
+  +--------+
+      |
+      v
   +------------------------+
   | Weighted Jaccard Score |
   +------------------------+
@@ -239,7 +231,7 @@ Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` us
    Results[]
 ```
 
-The `searchDense` use-case encodes the query vector to a fingerprint and searches LSH + HNSW. No lexical lane, no RRF, no reranker — pure semantic similarity.
+The `searchDense` use-case encodes the query vector to a fingerprint and searches LSH. No lexical lane, no RRF, no reranker — pure semantic similarity.
 
 ### 7. Checkpoint & Restart
 
@@ -250,7 +242,7 @@ The `searchDense` use-case encodes the query vector to a fingerprint and searche
       |          |          |          |
       v          v          v          v
   +--------+ +--------+ +--------+ +--------+
-  | LSH    | | Lexical| | Corpus | | WAL    |
+  | LSH    | | Lexical | | Corpus| | WAL   |
   | Buckets| | Postings| | IDF   | | Offset |
   +--------+ +--------+ +--------+ +--------+
       |          |          |          |
@@ -258,7 +250,7 @@ The `searchDense` use-case encodes the query vector to a fingerprint and searche
   lsh.bin   lexical.bin  corpus.bin  (header)
 ```
 
-`checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to disk, embedding the current WAL offset. On restart, Adaline loads the persisted indexes, replays only the un-checkpointed WAL tail, and rebuilds the HNSW reverse edge index in memory.
+`checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to disk, embedding the current WAL offset. On restart, Adaline loads the persisted indexes and replays only the un-checkpointed WAL tail.
 
 ---
 
@@ -267,8 +259,8 @@ The `searchDense` use-case encodes the query vector to a fingerprint and searche
 | File | Purpose |
 |------|---------|
 | `wal.bin` | Append-only text + metadata |
-| `fingerprints.bin` | Fingerprint store (header + 1280-byte slots) |
-| `graph.bin` | HNSW node store (header + 1032-byte slots) |
+| `fingerprints.bin` | Fingerprint store (header + compressed bitmaps) |
+| `fingerprints.idx` | Slot index (offset + compressed size per ID) |
 | `chunks.bin` | Parent-to-chunk mappings |
 | `lsh.bin` | Persisted LSH index (checkpoint) |
 | `lexical.bin` | Persisted lexical postings (checkpoint) |
@@ -332,16 +324,18 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 
 | Dataset | Corpus | Indexing | Query (top-100) | nDCG@10 | R@5 |
 |---------|--------|----------|-----------------|---------|-----|
-| SciFact | 5,183 docs | 1,143 docs/s | 260 q/s | 0.567 | 65.7% |
-| NFCorpus | 3,633 docs | 1,175 docs/s | 393 q/s | 0.273 | 10.8% |
-| ArguAna | 8,674 docs | 1,127 docs/s | 47 q/s | 0.165 | 22.1% |
+| SciFact | 5,183 docs | 4,421 docs/s | 277 q/s | 0.604 | 67.1% |
+| NFCorpus | 3,633 docs | 4,251 docs/s | 395 q/s | 0.279 | 10.9% |
+| ArguAna | 8,674 docs | 5,027 docs/s | 193 q/s | 0.252 | 38.1% |
+| FIQA | 57K docs | 5,677 docs/s | 14.6 q/s | 0.168 | — |
 | LongMemEval-S | 500 questions | — | — | — | 93.6% |
 | Vision (CIFAR-10 / MobileNetV2) | 200 vectors | — | 0.22 ms/q | — | — |
 
 **Performance Notes:**
-* **SciFact:** Recall@1 = 40.8%, MRR = 0.53. P50 latency ~3.9 ms for top-100.
-* **NFCorpus:** Precision@1 = 37.1%, MRR = 0.46. (Hard medical retrieval task with sparse labels).
-* **ArguAna:** Recall@1 = 0%, MRR = 0.12. (Adversarial counter-argument retrieval; semantic similarity struggles to distinguish opposing stances).
+* **SciFact:** Recall@1 = 45.3%, R@100 = 87.7%, MRR = 0.57. P50 latency ~3.6 ms for top-100.
+* **NFCorpus:** Recall@1 = 5.3%, Precision@1 = 37.8%, MRR = 0.47. P50 latency ~2.5 ms.
+* **ArguAna:** Recall@1 = 0%, R@100 = 97.3%, MRR = 0.17. P50 latency ~4.8 ms. (Adversarial counter-argument retrieval; lexical lane carries most signal).
+* **FIQA:** 57K financial QA pairs. Query latency ~68 ms for top-100.
 * **LongMemEval-S:** R@1 = 76.8%, R@5 = 93.6%. (Conversational memory retrieval).
 * **Vision (CIFAR-10 / MobileNetV2):** 1-shot classification 44.4% dense vs 42.2% sparse. 20-shot converges to 62.6% dense vs 61.8% sparse. Open-set AUROC 0.578.
 
@@ -356,10 +350,6 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 | `bigramWeight` | 0.25 | Jaccard weight for char-bigram block |
 | `contextWeight` | 0.25 | Jaccard weight for XOR-context block |
 | `lshBands` / `lshRows` | 80 / 2 | Fingerprint LSH banding (full 160-segment coverage) |
-| `hnswMaxLayers` | 8 | Maximum HNSW layers |
-| `hnswMaxNeighbors` | 16 | Max edges per layer |
-| `hnswEfConstruction` | 64 | HNSW build beam width |
-| `hnswEfSearch` | 64 | HNSW query beam width |
 | `dirichletMu` | 2000.0 | QLM smoothing parameter |
 | `rrfK` | 10 | Reciprocal Rank Fusion constant |
 | `rerankCoverageWeight` | 0.5 | Term-coverage boost weight |
@@ -367,12 +357,14 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 | `tokenProbes` | 3 | Base probes per token (reduced for sparsity) |
 | `bigramProbes` | 1 | Base probes per char-bigram |
 | `contextProbes` | 1 | Base probes per XOR-context feature |
+| `maxTokenFeatures` | 12 | Top-K IDF tokens kept per document (0 = disable) |
+| `queryProbeMultiplier` | 2.0 | Extra probe multiplier for short queries |
 
 ---
 
 ## Dense-Vector Pipeline
 
-Adaline can index float32 vectors (e.g. CNN embeddings, tabular features) through a parallel API that bypasses text chunking and lexical indexing. The pipeline uses the same 10,240-bit fingerprint format, LSH bands, and HNSW graph as text — only the encoder changes.
+Adaline can index float32 vectors (e.g. CNN embeddings, tabular features) through a parallel API that bypasses text chunking and lexical indexing. The pipeline uses the same 10,240-bit fingerprint format and LSH bands as text — only the encoder changes.
 
 ### k-WTA Binarization
 
@@ -401,17 +393,17 @@ results = eng.searchDense(query_features, topK=10)
 eng.deleteDense(id)
 ```
 
-* Dense-vector insert populates **only** LSH and HNSW — no WAL entry, no lexical posting, no chunk mapping.
-* Dense-vector search queries **only** LSH + HNSW — no lexical lane, no RRF, no reranker.
-* Dense-vector delete removes the slot from LSH and heals HNSW edges via the reverse index, same as text delete.
+* Dense-vector insert populates **only** LSH — no WAL entry, no lexical posting, no chunk mapping.
+* Dense-vector search queries **only** LSH — no lexical lane, no RRF, no reranker.
+* Dense-vector delete removes the slot from LSH, same as text delete.
 
-There is no schema flag or runtime dispatch. Text and dense vectors are managed through separate, explicit APIs (`insert` vs `insertDense`). They share the underlying storage and graph but are not interchangeable at the entity level.
+There is no schema flag or runtime dispatch. Text and dense vectors are managed through separate, explicit APIs (`insert` vs `insertDense`). They share the underlying storage but are not interchangeable at the entity level.
 
 ### Vision Benchmark
 
 `benchmarks/vision_bench.nim` runs CIFAR-10 classification using MobileNetV2 features extracted via `benchmarks/dump_features.py`:
 
-| Task | Dense Cosine | Sparse HNSW |
+| Task | Dense Cosine | Sparse LSH |
 |------|-------------|-------------|
 | 1-shot classify | 44.4% | 42.2% |
 | 20-shot classify | 62.6% | 61.8% |

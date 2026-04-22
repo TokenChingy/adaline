@@ -8,7 +8,7 @@ import ../../algorithms/fingerprint_lsh
 import ../../algorithms/lexical_index
 import ../../algorithms/corpus_index
 import ../../../infrastructure/mmapped_storage
-import std/tables
+import std/[tables, sets]
 
 type
   MemoryService* = object
@@ -17,9 +17,7 @@ type
     lsh*: FingerprintLshIndex
     lexical*: LexicalIndex
     corpus*: CorpusIndex
-    maxHnswLayer*: int
-    hnswEntryPoint*: uint64
     textCache*: Table[uint64, string]
+    tokenCache*: Table[uint64, HashSet[string]]
     timestampCache*: Table[uint64, uint64]
     chunkToParent*: Table[uint64, uint64]
-    hnswReverseIndex*: Table[uint64, seq[uint64]]

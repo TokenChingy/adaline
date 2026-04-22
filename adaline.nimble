@@ -1,7 +1,7 @@
 # Package
 version       = "0.1.0"
 author        = "Adaline"
-description   = "Sparse Distributed Representations using Sparse Fingerprints and HNSW"
+description   = "Sparse Distributed Representations using Sparse Fingerprints and LSH"
 license       = "MIT"
 srcDir        = "."
 bin           = @["adaline"]
@@ -28,7 +28,6 @@ task test, "Compile and run all tests":
     "tests/domain/test_fingerprint.nim",
     "tests/domain/test_sdr_encoder.nim",
     "tests/domain/test_corpus_index.nim",
-    "tests/domain/test_hnsw_node.nim",
     "tests/domain/test_lexical_index.nim",
     "tests/domain/test_fingerprint_lsh.nim",
     "tests/domain/test_reranker.nim",
@@ -38,7 +37,6 @@ task test, "Compile and run all tests":
     "tests/domain/test_chunk.nim",
     "tests/domain/test_config.nim",
     "tests/domain/test_memory.nim",
-    "tests/domain/test_hnsw_graph.nim",
     "tests/use_cases/test_insert_memory.nim",
     "tests/use_cases/test_search_memories.nim",
     "tests/use_cases/test_update_memory.nim",

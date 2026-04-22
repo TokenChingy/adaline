@@ -1,19 +1,16 @@
 ## Memory-mapped storage adapter.
-## Manages WAL, compressed fingerprint store, graph store, and chunk mapping
-## store. Fingerprints are stored segment-sparse: only non-zero uint64
-## segments are persisted, cutting disk usage by ~50-60% for typical SDR
-## fingerprints. The graph store uses a runtime-configurable record size.
+## Manages WAL, adaptive-compressed fingerprint store, and chunk
+## mapping store. Fingerprints use three formats selected by active-segment
+## count: sparse (<=20), bitmap (21–157), or raw (>=158).
 ##
 ## File layout:
 ##   fingerprints.bin  – 256-byte header + append-only compressed data
 ##   fingerprints.idx  – 256-byte header + (offset: uint32, size: uint32) table
-##   graph.bin         – 256-byte header + fixed-size HnswNode records
 ##   wal.bin           – append-only write-ahead log
 ##   chunks.bin        – append-only chunk lineage
 
 
 import ../domain/entities/fingerprint
-import ../domain/entities/hnsw_node
 import std/[memfiles, os]
 
 const
@@ -32,8 +29,6 @@ type
     capacity: uint64
     freelistHead: uint64
     freelistCount: uint64
-    hnswMaxLayers: uint16
-    hnswMaxNeighbors: uint16
 
   FpIdxEntry* = object
     offset*: uint32
@@ -50,12 +45,6 @@ type
     fpIdxMemFile*: MemFile
     fpIdxMem*: pointer
     fpIdxCapacity*: uint64
-    graphMemFile*: MemFile
-    graphMem*: pointer
-    graphCapacity*: uint64
-    graphRecordSize*: uint64
-    graphMaxLayers*: int
-    graphMaxNeighbors*: int
     chunksFile*: File
     chunksSize*: uint64
     recordCount*: uint64
@@ -72,8 +61,6 @@ proc writeHeader(f: File; h: StoreHeader) =
   discard f.writeBuffer(unsafeAddr h.capacity, 8)
   discard f.writeBuffer(unsafeAddr h.freelistHead, 8)
   discard f.writeBuffer(unsafeAddr h.freelistCount, 8)
-  discard f.writeBuffer(unsafeAddr h.hnswMaxLayers, 2)
-  discard f.writeBuffer(unsafeAddr h.hnswMaxNeighbors, 2)
   f.flushFile()
 
 proc readHeader(f: File): StoreHeader =
@@ -85,12 +72,10 @@ proc readHeader(f: File): StoreHeader =
   discard f.readBuffer(addr result.capacity, 8)
   discard f.readBuffer(addr result.freelistHead, 8)
   discard f.readBuffer(addr result.freelistCount, 8)
-  discard f.readBuffer(addr result.hnswMaxLayers, 2)
-  discard f.readBuffer(addr result.hnswMaxNeighbors, 2)
 
 const FreelistNull = uint64.high
 
-proc makeHeader(recordSize: uint16; hnswMaxLayers: uint16 = 0; hnswMaxNeighbors: uint16 = 0): StoreHeader =
+proc makeHeader(recordSize: uint16): StoreHeader =
   result.magic = [StoreMagic[0], StoreMagic[1], StoreMagic[2], StoreMagic[3]]
   result.version = StoreVersion
   result.recordSize = recordSize
@@ -98,18 +83,6 @@ proc makeHeader(recordSize: uint16; hnswMaxLayers: uint16 = 0; hnswMaxNeighbors:
   result.capacity = 0
   result.freelistHead = FreelistNull
   result.freelistCount = 0
-  result.hnswMaxLayers = hnswMaxLayers
-  result.hnswMaxNeighbors = hnswMaxNeighbors
-
-proc isNewFormat(path: string): bool =
-  if not fileExists(path) or getFileSize(path) < StoreHeaderSize:
-    return false
-  var f = system.open(path, fmRead)
-  defer: f.close()
-  var magic: array[4, char]
-  discard f.readBuffer(addr magic[0], 4)
-  result = (magic == [StoreMagic[0], StoreMagic[1], StoreMagic[2], StoreMagic[3]])
-
 
 proc extendFile(path: string; newSize: uint64) =
   var f = system.open(path, fmReadWriteExisting)
@@ -117,40 +90,11 @@ proc extendFile(path: string; newSize: uint64) =
   f.write('\0')
   f.close()
 
-proc preallocateFile(path: string; recordSize: uint64; minSlots: uint64): uint64 =
-  let bytesPerChunk = uint64(GrowthChunkBytes)
-  let slotsPerChunk = bytesPerChunk div recordSize
-  if slotsPerChunk == 0:
-    result = minSlots
-  else:
-    result = ((minSlots + slotsPerChunk - 1) div slotsPerChunk) * slotsPerChunk
-
-  let totalBytes = uint64(StoreHeaderSize) + result * recordSize
-  extendFile(path, totalBytes)
-
 proc preallocateBytes(path: string; minBytes: uint64): uint64 =
   let bytesPerChunk = uint64(GrowthChunkBytes)
   result = ((minBytes + bytesPerChunk - 1) div bytesPerChunk) * bytesPerChunk
   extendFile(path, result)
 
-
-proc growGraphStore*(storage: MmappedStorage; minCount: uint64) =
-  if minCount <= storage.graphCapacity:
-    return
-  let graphPath = storage.dataDir / "graph.bin"
-  let newCapacity = preallocateFile(graphPath, storage.graphRecordSize, minCount)
-
-  storage.graphMemFile.close()
-  let newSize = StoreHeaderSize + int(newCapacity * storage.graphRecordSize)
-  storage.graphMemFile = memfiles.open(graphPath, mode = fmReadWrite, mappedSize = newSize)
-  storage.graphMem = cast[pointer](cast[uint](storage.graphMemFile.mem) + uint(StoreHeaderSize))
-  storage.graphCapacity = newCapacity
-
-  var f = system.open(graphPath, fmReadWriteExisting)
-  var h = readHeader(f)
-  h.capacity = newCapacity
-  writeHeader(f, h)
-  f.close()
 
 proc growFpIdx*(storage: MmappedStorage; minCount: uint64) =
   if minCount <= storage.fpIdxCapacity:
@@ -192,13 +136,9 @@ proc growFpData*(storage: MmappedStorage; minBytes: uint64) =
   f.close()
 
 
-proc initStorage*(dataDir: string; hnswMaxLayers, hnswMaxNeighbors: int): MmappedStorage =
+proc initStorage*(dataDir: string): MmappedStorage =
   result = MmappedStorage(dataDir: dataDir)
   createDir(dataDir)
-
-  result.graphMaxLayers = hnswMaxLayers
-  result.graphMaxNeighbors = hnswMaxNeighbors
-  result.graphRecordSize = uint64(hnswNodeRecordSize(hnswMaxLayers, hnswMaxNeighbors))
 
   let walPath = dataDir / "wal.bin"
   result.walFile = system.open(walPath, fmAppend)
@@ -249,38 +189,6 @@ proc initStorage*(dataDir: string; hnswMaxLayers, hnswMaxNeighbors: int): Mmappe
   discard fHdr.readBuffer(addr storedCap, 8)
   fHdr.close()
   result.fpDataCapacity = storedCap - uint64(StoreHeaderSize)
-
-  let graphPath = dataDir / "graph.bin"
-  if not fileExists(graphPath):
-    let gRecordSize = uint16(result.graphRecordSize)
-    var h = makeHeader(gRecordSize, uint16(hnswMaxLayers), uint16(hnswMaxNeighbors))
-    var f = system.open(graphPath, fmReadWrite)
-    writeHeader(f, h)
-    f.close()
-    let initialSlots = preallocateFile(graphPath, result.graphRecordSize, 1024)
-    var f2 = system.open(graphPath, fmReadWriteExisting)
-    var h2 = readHeader(f2)
-    h2.capacity = initialSlots
-    writeHeader(f2, h2)
-    f2.close()
-  elif not isNewFormat(graphPath):
-    raise newException(IOError, "graph.bin uses old format without header. Please re-index.")
-  else:
-    var f = system.open(graphPath, fmRead)
-    var h = readHeader(f)
-    f.close()
-    if int(h.hnswMaxLayers) != hnswMaxLayers or int(h.hnswMaxNeighbors) != hnswMaxNeighbors:
-      raise newException(IOError,
-        "graph.bin was created with hnswMaxLayers=" & $h.hnswMaxLayers &
-        ", hnswMaxNeighbors=" & $h.hnswMaxNeighbors &
-        " but config requests " & $hnswMaxLayers & ", " & $hnswMaxNeighbors &
-        ". Please re-index.")
-    result.graphRecordSize = uint64(h.recordSize)
-
-  let graphSize = uint64(getFileSize(graphPath))
-  result.graphMemFile = memfiles.open(graphPath, mode = fmReadWrite, mappedSize = int(graphSize))
-  result.graphMem = cast[pointer](cast[uint](result.graphMemFile.mem) + uint(StoreHeaderSize))
-  result.graphCapacity = (graphSize - uint64(StoreHeaderSize)) div result.graphRecordSize
 
   let chunksPath = dataDir / "chunks.bin"
   result.chunksFile = system.open(chunksPath, fmAppend)
@@ -355,6 +263,9 @@ proc readFingerprint*(storage: MmappedStorage; memoryId: uint64; outFp: ptr Fing
   let entry = cast[ptr UncheckedArray[FpIdxEntry]](storage.fpIdxMem)[memoryId]
   if entry.size == 0:
     zeroMem(outFp, sizeof(Fingerprint))
+  elif entry.size == uint32(sizeof(Fingerprint)):
+    let src = cast[pointer](cast[uint](storage.fpDataMem) + uint(entry.offset))
+    copyMem(outFp, src, sizeof(Fingerprint))
   else:
     let src = cast[pointer](cast[uint](storage.fpDataMem) + uint(entry.offset))
     decompressFingerprint(src, outFp)
@@ -384,15 +295,6 @@ proc writeFingerprint*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprin
 
 proc writeFingerprintUnsafe*(storage: MmappedStorage; memoryId: uint64; fp: Fingerprint) {.inline.} =
   storage.writeFingerprint(memoryId, fp)
-
-proc getHnswNodeView*(storage: MmappedStorage; memoryId: uint64): HnswNodeView {.inline.} =
-  let offset = memoryId * storage.graphRecordSize
-  makeView(cast[pointer](cast[uint](storage.graphMem) + uint(offset)),
-           storage.graphMaxNeighbors, storage.graphMaxLayers)
-
-proc ensureGraphCapacity*(storage: MmappedStorage; memoryId: uint64) {.inline.} =
-  if memoryId >= storage.graphCapacity:
-    storage.growGraphStore(memoryId + 1)
 
 
 proc syncHeader*(storage: MmappedStorage) =
@@ -426,8 +328,6 @@ proc freeId*(storage: MmappedStorage; id: uint64) =
   idxArr[id].size = 0
   storage.freelistHead = id
   storage.freelistCount.inc
-  let node = storage.getHnswNodeView(id)
-  clearNode(node)
 
 proc idCount*(storage: MmappedStorage): uint64 =
   result = storage.recordCount
@@ -440,5 +340,3 @@ proc syncRecordCount*(storage: MmappedStorage; count: uint64) =
     storage.recordCount = count
   if count > storage.fpIdxCapacity:
     storage.growFpIdx(count)
-  if count > storage.graphCapacity:
-    storage.growGraphStore(count)

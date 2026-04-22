@@ -1,7 +1,7 @@
 ## Engine configuration entity.
 ## Defines all tunable parameters: fingerprint dimensions, SDR probe
-## counts, HNSW graph structure, LSH banding, lexical smoothing,
-## RRF constants, chunking thresholds, and query-time multipliers.
+## counts, LSH banding, lexical smoothing, RRF constants, chunking
+## thresholds, and query-time multipliers.
 
 
 type
@@ -25,11 +25,6 @@ type
     lshBands*: int
     lshRows*: int
 
-    hnswMaxLayers*: int
-    hnswMaxNeighbors*: int
-    hnswEfConstruction*: int
-    hnswEfSearch*: int
-
     dirichletMu*: float
 
     rrfK*: int
@@ -40,6 +35,8 @@ type
     chunkSaturationThreshold*: float
 
     queryProbeMultiplier*: float
+
+    maxTokenFeatures*: int
 
     semanticSearchEnabled*: bool
     lexicalSearchEnabled*: bool
@@ -60,15 +57,12 @@ proc defaultEngineConfig*(): EngineConfig =
     contextProbes: 1,
     lshBands: 80,
     lshRows: 2,
-    hnswMaxLayers: 8,
-    hnswMaxNeighbors: 16,
-    hnswEfConstruction: 64,
-    hnswEfSearch: 64,
     dirichletMu: 2000.0,
     rrfK: 10,
     rerankCoverageWeight: 0.5,
     chunkSaturationThreshold: 0.6,
     queryProbeMultiplier: 2.0,
+    maxTokenFeatures: 12,
     semanticSearchEnabled: true,
     lexicalSearchEnabled: true,
   )

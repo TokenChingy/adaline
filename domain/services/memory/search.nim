@@ -1,14 +1,15 @@
 ## Search memory service.
-## Runs parallel semantic (LSH → HNSW) and lexical (inverted index)
+## Runs parallel semantic (LSH brute-force) and lexical (inverted index)
 ## lanes, merges results via RRF, resolves chunks to parents,
 ## and applies term-coverage reranking.
 
 
 import ./types
 import ../../entities/memory
+import ../../entities/fingerprint
 import ../../algorithms/sdr_encoder
 import ../../algorithms/fingerprint_lsh
-import ../../algorithms/hnsw_graph
+import ../../algorithms/weighted_jaccard
 import ../../algorithms/lexical_index
 import ../../algorithms/rrf_merger
 import ../../algorithms/reranker
@@ -22,12 +23,22 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   let qfp = encodeSdr(query, service.cfg, service.corpus, isQuery = true)
   var semanticResults = newSeq[tuple[memoryId: uint64, score: float]]()
   if service.cfg.semanticSearchEnabled:
-    let lshSeeds = queryLsh(service.lsh, addr qfp)
-    if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
-      semanticResults = searchHnsw(service.storage.graphMem, readFingerprintWrapper,
-                                   addr service.storage, lshSeeds,
-                                   service.hnswEntryPoint, addr qfp, k, service.cfg,
-                                   service.storage.graphRecordSize)
+    var lshSeeds = queryLsh(service.lsh, addr qfp)
+    lshSeeds.sort()
+    var scored = newSeq[tuple[score: float, memoryId: uint64]](lshSeeds.len)
+    for i in 0 ..< lshSeeds.len:
+      var sfp: Fingerprint
+      service.storage.readFingerprint(lshSeeds[i], addr sfp)
+      scored[i] = (weightedJaccard(addr qfp, addr sfp, service.cfg), lshSeeds[i])
+    scored.sort(proc(a, b: auto): int =
+      if a.score > b.score: return -1
+      if a.score < b.score: return 1
+      return 0
+    )
+    let topK = min(k, scored.len)
+    semanticResults = newSeq[tuple[memoryId: uint64, score: float]](topK)
+    for i in 0 ..< topK:
+      semanticResults[i] = (scored[i].memoryId, scored[i].score)
 
   var lexicalResults = newSeq[tuple[memoryId: uint64, score: float]]()
   if service.cfg.lexicalSearchEnabled:
@@ -61,5 +72,5 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   if candidates.len > k:
     candidates.setLen(k)
 
-  rerank(query, candidates, service.textCache, service.cfg)
+  rerank(query, candidates, service.tokenCache, service.cfg)
   result = candidates

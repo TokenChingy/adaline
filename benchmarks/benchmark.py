@@ -7,7 +7,7 @@ Demonstrates Adaline's sparse-fingerprint retrieval on non-NLP inputs
 cosine-similarity baseline to show how much the sparse encoding preserves.
 
 When the Adaline Python bindings are compiled, pass --engine to also
-benchmark the actual Nim HNSW+LSH search path (O(log N) instead of
+benchmark the actual Nim LSH search path (O(log N) instead of
 brute-force Jaccard).
 
 Requirements:
@@ -224,7 +224,7 @@ def engine_retrieve(query_feats: np.ndarray,
                     proto_feats: np.ndarray,
                     proto_labels: np.ndarray,
                     n_classes: int) -> tuple:
-    """Top-1 NN via actual Adaline Engine (HNSW+LSH)."""
+    """Top-1 NN via actual Adaline Engine (LSH)."""
     with AdalineEngineWrapper() as eng:
         eng.insert_prototypes(proto_feats, proto_labels)
         preds, all_scores, ms_per_q = eng.search(query_feats, n_classes)
@@ -310,7 +310,7 @@ def bench_fewshot(tr_feats, tr_labels, te_feats, te_labels,
     print('  Adaline showcase: accuracy should improve rapidly with more prototypes')
     print('  and the sparse encoders should stay within a few % of dense.')
     if use_engine:
-        print('  The engine column uses the actual Nim HNSW+LSH index (O(log N) search).')
+        print('  The engine column uses the actual Nim LSH index (O(log N) search).')
 
 
 # ─── Benchmark 3: incremental ────────────────────────────────────────────────
@@ -406,7 +406,7 @@ def bench_incremental(tr_feats, tr_labels, te_feats, te_labels,
     print('  Key insight: accuracy should degrade gracefully as classes grow')
     print('  with no retraining — and sparse encoders should track dense closely.')
     if use_engine:
-        print('  Engine uses real HNSW+LSH (O(log N) search); pure-Python')
+        print('  Engine uses real LSH (O(log N) search); pure-Python')
         print('  encoders use brute-force Jaccard (O(N) scan).')
 
 
@@ -690,7 +690,7 @@ def bench_resnet_comparison(tr_feats, tr_labels, te_feats, te_labels,
 
     print()
     print(f"  * Brute-force Jaccard over all {n_proto_total:,} fingerprints.")
-    print(f"    Adaline's HNSW searches O(log N) nodes: estimated < 1 ms/query")
+    print(f"    Adaline's LSH searches O(log N) nodes: estimated < 1 ms/query")
     print(f"    (from Nim benchmarks: ~222 q/s on SciFact corpus).")
     print(f"    MFP = mega floating-point ops.  Mbit = mega bit ops (~10-30× cheaper/op).\n")
 
@@ -752,7 +752,7 @@ def main():
     p.add_argument('--n-train-per-class', type=int, default=20,
                    help='ImageNet only: training images sampled per class for prototypes')
     p.add_argument('--engine', action='store_true',
-                   help='Also benchmark the compiled Adaline Engine (HNSW+LSH) '
+                   help='Also benchmark the compiled Adaline Engine (LSH) '
                         'via Python bindings. Requires: nimble python')
     p.add_argument('--seed', type=int, default=42)
     args = p.parse_args()
@@ -768,7 +768,7 @@ def main():
     print(f'Adaline Vision Benchmark  —  {args.dataset.upper()} / {backbone}')
     if args.engine:
         if _HAS_ADALINE:
-            print('Engine mode: ON  (using compiled Nim HNSW+LSH index)')
+            print('Engine mode: ON  (using compiled Nim LSH index)')
         else:
             print('WARNING: --engine requested but Adaline bindings not found.')
             print('         Compile with: nimble python')

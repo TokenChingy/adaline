@@ -1,18 +1,16 @@
 ## Insert memory service.
 ## Orchestrates the full insert pipeline: WAL append, chunking,
-## SDR encoding, LSH indexing, lexical indexing, and HNSW graph
-## insertion with layer assignment and neighbor wiring.
+## SDR encoding, LSH indexing, and lexical indexing.
 
 
 import ./types
 import ../../algorithms/sdr_encoder
 import ../../algorithms/corpus_index
 import ../../algorithms/fingerprint_lsh
-import ../../algorithms/hnsw_graph
 import ../../algorithms/lexical_index
 import ../../algorithms/chunker
 import ../../../infrastructure/mmapped_storage
-import std/[tables, times]
+import std/[tables, sets, times, strutils]
 
 export types
 
@@ -23,6 +21,10 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
   discard storage.appendWal(parentId, timestamp, content)
   service.textCache[parentId] = content
+  service.tokenCache[parentId] = initHashSet[string]()
+  for token in content.toLowerAscii().split(AllChars - Letters - Digits):
+    if token.len > 0:
+      service.tokenCache[parentId].incl(token)
   service.timestampCache[parentId] = timestamp
 
   service.corpus.addMemory(content)
@@ -40,10 +42,6 @@ proc insert*(service: var MemoryService; content: string): uint64 =
     insertLsh(service.lsh, addr fp, chunkId)
 
     addMemory(service.lexical, chunkId, content)
-
-    insertHnsw(storage.graphMem, readFingerprintWrapper, addr storage,
-               chunkId, addr fp, service.cfg, service.maxHnswLayer,
-               service.hnswEntryPoint, service.hnswReverseIndex, storage.graphRecordSize)
   else:
     for chunkText in chunks:
       let chunkId = storage.allocId()
@@ -56,9 +54,5 @@ proc insert*(service: var MemoryService; content: string): uint64 =
       insertLsh(service.lsh, addr fp, chunkId)
 
       addMemory(service.lexical, chunkId, chunkText)
-
-      insertHnsw(storage.graphMem, readFingerprintWrapper, addr storage,
-                 chunkId, addr fp, service.cfg, service.maxHnswLayer,
-                 service.hnswEntryPoint, service.hnswReverseIndex, storage.graphRecordSize)
 
   result = parentId

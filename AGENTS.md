@@ -2,7 +2,7 @@
 
 ## What this project is
 
-Adaline is a Nim library for generating and querying **Sparse Distributed Representations** via **Sparse Fingerprints**. Each fingerprint is a fixed-size **10240-bit bitmap**. These fingerprints are stored and searched inside a **Hierarchical Navigable Small World (HNSW) Graph** with a **Fingerprint LSH** (GoldFinger-style) seed layer. A **Lexical Sidecar** (Query Likelihood with Dirichlet Smoothing) runs in parallel, and results are merged via **Reciprocal Rank Fusion**.
+Adaline is a Nim library for generating and querying **Sparse Distributed Representations** via **Sparse Fingerprints**. Each fingerprint is a fixed-size **10240-bit bitmap**. These fingerprints are stored and searched via a **Fingerprint LSH** (GoldFinger-style) seed layer with brute-force Jaccard scoring. A **Lexical Sidecar** (Query Likelihood with Dirichlet Smoothing) runs in parallel, and results are merged via **Reciprocal Rank Fusion**.
 
 Long memories are automatically **chunked** into multiple fingerprints when any block approaches saturation. Chunk-to-parent linkage is persisted in `chunks.bin`.
 
@@ -15,13 +15,12 @@ use_cases/          <- One file per use-case. Each file declares its own
                        input/output ports (contracts). No business logic here;
                        only wiring and orchestration.
                        (insert, search, update, delete)
-domain/entities/    <- Core types: Fingerprint, HNSW node, Memory, Config, Chunk.
+domain/entities/    <- Core types: Fingerprint, Memory, Config, Chunk.
 domain/algorithms/  <- The math:
                        - SDR encoder (partitioned Tokens / Bigrams / XOR Context)
                        - Dense encoder (k-WTA float32 vector → fingerprint)
                        - Regional weighted Jaccard
                        - Banded Fingerprint LSH (GoldFinger-style)
-                       - HNSW construction and greedy search
                        - Lexical index (QLM + Dirichlet smoothing)
                        - Corpus index (IDF tracking)
                        - RRF merger
@@ -32,8 +31,7 @@ domain/services/    <- Pure domain orchestration. Each operation lives in
                        checkpoint, insert_dense, search_dense, delete_dense).
                        Import the specific file; no umbrella re-export.
  infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
-                       graph store, chunks mapping store). Imported by domain
-                       services when needed.
+                       chunks mapping store). Imported by domain services when needed.
 bindings/           <- Python bindings (nimpy) exposing the same use cases.
 benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark,
                        Python vision suite, `vision_bench.nim` (Nim dense-vector
@@ -58,73 +56,28 @@ Use Cases ← Domain ← Infrastructure
 
 - **Language:** Nim
 - **Fingerprint size:** 10240 bits (1280 bytes)
-- **Storage:** Memory-mapped flat files with self-describing headers (WAL, fingerprint store, graph store, chunks mapping store, persisted LSH/lexical/corpus indexes)
-- **Index / search structure:** Banded Fingerprint LSH + HNSW Graph
+- **Storage:** Memory-mapped flat files with self-describing headers (WAL, fingerprint store, chunks mapping store, persisted LSH/lexical/corpus indexes)
+- **Index / search structure:** Banded Fingerprint LSH + brute-force Jaccard
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
 - **Merger:** Reciprocal Rank Fusion (RRF)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
-- **Delete / Update:** `deleteMemory()` and `updateMemory()` use an in-memory reverse edge index to heal HNSW neighbor lists without tombstones or full rebuilds
+- **Delete / Update:** `deleteMemory()` and `updateMemory()` remove entries from LSH and lexical indexes, then free the slot for reuse.
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
 - **Python bindings:** `bindings/adaline.nim` exposes `Engine` (insert, search, update, delete, stats, checkpoint) via nimpy. Build with `nimble python`.
 - **Dense-vector encoding:** `domain/algorithms/dense_encoder.nim` provides `encodeDense()` for converting L2-normalised float32 vectors into fingerprints via k-WTA, enabling vision / signal / tabular use cases.
+- **Adaptive fingerprint compression:** Three formats selected by active-segment count: sparse (≤20), bitmap (21–157), or raw (≥158). Text SDR fingerprints average ~220 bytes with top-K filtering; dense-vector fingerprints compress to ~19 bytes.
+- **Top-K token filtering:** Documents encode only the top-K tokens by IDF (default 12). This cuts fingerprint size to ~220 bytes (~83% savings) while improving nDCG@10 and MRR by ~4 points on SciFact.
+- **LSH query optimizations:** Epoch-array dedup (replaces `HashSet` per query), AND-construction (min 2 band hits), fast-path `bandHash` (unrolled, no `mod` for default config), in-place `removeLsh`, and pre-sized table on `loadLsh`. These optimizations more than doubled SciFact query throughput (125 → 277 q/s) with no recall loss.
+- **Lexical lane `seq[float]` scoring:** Replaced `Table[uint64, float]` docScores with a dense `seq[float>` + touched-list, eliminating hash-table overhead in the posting-loop hot path.
+- **Pre-tokenized rerank cache:** Added `tokenCache: Table[uint64, HashSet[string]]` to `MemoryService`, populated on insert/update. Reranker now does HashSet lookups instead of per-query tokenization.
 
-## Semantic Path Diagnostics
+## Historical Notes
 
-The following issues were discovered and fixed during a systematic ablation study (see `BENCHMARK.md` for full numbers). The branches below exist in this repo for reference.
+Older branches (`fix/no-graph-weyl-sparse`, `master`) included an HNSW graph layer on top of LSH. This was removed after systematic benchmarking showed that with sparse fingerprints (top-K filtering, k-WTA dense vectors), HNSW graph edges were too weak to provide navigability benefits. LSH + brute-force Jaccard is faster to insert, equally fast (or faster) to query, and yields identical recall across all tested corpus sizes (3K–57K docs).
 
-### Critical: `searchLayer` early-termination bug
+**Lane ablation (SciFact):** Disabling the lexical lane drops recall@100 from 87.7% to 40.6% and nDCG@10 from 0.604 to 0.348. The lexical lane is critical on text datasets with heavy lexical overlap.
 
-**File:** `domain/algorithms/hnsw_graph.nim`  
-**Fix:** `results.len > 0` → `results.len >= ef`
-
-The original code broke the best-first search **even when the result buffer was not full** (`results.len < ef`). This caused premature stopping during both insertion (`efConstruction=200`) and query (`efSearch=64`). The bug destroyed graph navigability: with `ef=1` during greedy upper-layer descent, the loop stopped after exploring a single neighbor.
-
-**Impact on SciFact semantic path:** R@100 rose from **5.2% → 53.5%** after this fix alone.
-
-### Critical: LSH ignored 37.5% of the fingerprint
-
-**File:** `domain/entities/config.nim`  
-**Fix:** `lshBands: 50` → `lshBands: 80`
-
-With the default config (`lshBands=50`, `lshRows=2`), only segments 0..99 of the 160 uint64 segments were hashed by `bandHash`. The entire XOR-context block (segments 112..159) and the tail of the bigram block (segments 100..111) were invisible to LSH candidate generation.
-
-**Impact:** Raising `lshBands` to 80 covers all 160 segments and adds **~5 points** of semantic R@100 on top of the bug fix.
-
-### Safety: dangling entry point after delete
-
-**File:** `domain/services/memory/delete.nim`  
-**Fix:** After deleting chunks, scan remaining nodes and update `hnswEntryPoint` / `maxHnswLayer` if the entry point was removed.
-
-Without this fix, a search after deleting the entry-point node dereferences a freed/reused slot.
-
-### Tested but NOT recommended
-
-| Experiment | Branch | Result |
-|------------|--------|--------|
-| **Weyl-sequence probes** | `exp/hash-weyl-fixed` | Marginal combined nDCG@10 gain, but changes fingerprint generation (breaks existing indexes). **Adopted on `fix/no-graph-weyl-sparse`.** |
-| **Standard HNSW layer distribution (`mL = 1/ln(M)`)** | `exp/hnsw-layer-p-fixed` | **Hurts** semantic recall. The dense hierarchy (`p=0.5`) works better for sparse Jaccard fingerprints than the standard sparse hierarchy. |
-| **Diversity-aware neighbor pruning** | `exp/diversity-heuristic` | **Hurts** semantic recall and is **~10× slower** at insertion. The standard HNSW `selectNeighbors` heuristic is designed for dense Euclidean spaces; simple distance truncation is superior for sparse SDRs. |
-
-### Branch: `fix/no-graph-weyl-sparse`
-
-This branch includes the three critical fixes (searchLayer, LSH coverage, entryPoint delete), replaces correlated `probeBlock` hashing with a Weyl sequence, and increases fingerprint sparsity.
-
-**Changes:**
-- **Config:** `hnswMaxNeighbors: 16`, `hnswEfConstruction: 64`, `hnswEfSearch: 64`.
-- **Search (`domain/services/memory/search.nim`):** LSH seeds + HNSW approximate search.
-- **Insert (`domain/services/memory/insert.nim`):** WAL → corpus → chunk → fingerprint → LSH → lexical → HNSW.
-- **Delete (`domain/services/memory/delete.nim`):** Heals HNSW edges via reverse index; zeros fingerprint so deleted slots are skipped.
-- **SDR encoder (`domain/algorithms/sdr_encoder.nim`):** `probeBlock` now uses `h0 + i * 0x9e3779b97f4a7c15` (Weyl sequence) instead of `hashFeature(feature, uint64(i))`, guaranteeing independent probes.
-- **Sparsity defaults:** `tokenProbes: 4→3`, `bigramProbes: 2→1`, `contextProbes: 2→1`.
-- **LSH defaults:** `lshBands: 50→80`, `lshRows: 3→2` (full coverage of all 160 segments).
-- **Storage (`infrastructure/mmapped_storage.nim`):** `freeId` zeros the fingerprint so brute-force search skips deleted slots.
-- **Dense encoder (`domain/algorithms/dense_encoder.nim`):** New k-WTA encoder for float32 vectors (vision / signal / tabular).
-- **Python vision suite (`benchmarks/benchmark.py`, `dense_encoder.py`, `feature_extractor.py`, `dump_features.py`):** CIFAR-10 / ImageNet feature extraction and benchmarking.  `benchmark.py` can optionally exercise the actual compiled Adaline Engine (`--engine`) via Python bindings for HNSW+LSH search.
-- **Dense-vector pipeline (`domain/services/memory/insert_dense.nim`, `search_dense.nim`, `delete_dense.nim`):** Bypasses text chunking and lexical indexing to encode float32 vectors directly into fingerprints for vision / signal / tabular use cases.
-
-**Trade-off:** Compared to baseline (master), query throughput is **~17% higher** (222→260 q/s) with better R@100 (86.49%→89.22%). The denser graph (M=16) trades ~2× insertion speed for stronger recall at depth, while ef=64 keeps query latency competitive.
-
-For small corpora where insertion speed and semantic recall matter more than query throughput, the HNSW graph can be disabled by setting `hnswMaxLayers: 0`.
+**Lane contribution (SciFact top-k):** Semantic-only 47.3%, Lexical-only 47.1%, Both lanes 5.6%.
 
 ## Comment Style
 
@@ -139,8 +92,7 @@ Example:
 ```nim
 ## Dense-vector insert service.
 ## Bypasses text chunking and lexical indexing.
-## Encodes a float32 vector directly to a fingerprint and inserts
-## into LSH and HNSW.
+## Encodes a float32 vector directly to a fingerprint and inserts into LSH.
 
 proc insertDense*(service: var MemoryService; vec: seq[float32]): uint64 =
   ...

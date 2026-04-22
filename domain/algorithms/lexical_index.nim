@@ -11,6 +11,7 @@ type
     memLengths*: Table[uint64, uint32]
     corpusTermFreqs*: Table[string, uint64]
     totalCorpusTokens*: uint64
+    maxMemoryId*: uint64
     mu*: float
 
 proc tokenize*(text: string): seq[string] =
@@ -46,6 +47,8 @@ proc addMemory*(index: var LexicalIndex; memoryId: uint64; text: string) =
   let tokens = tokenize(text)
   index.memLengths[memoryId] = uint32(tokens.len)
   index.totalCorpusTokens += uint64(tokens.len)
+  if memoryId > index.maxMemoryId:
+    index.maxMemoryId = memoryId
 
   var termFreqs = initCountTable[string]()
   for token in tokens:
@@ -57,7 +60,9 @@ proc addMemory*(index: var LexicalIndex; memoryId: uint64; text: string) =
 
 proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memoryId: uint64, score: float]] =
   let qTokens = tokenize(query)
-  var docScores = initTable[uint64, float]()
+  let maxId = int(index.maxMemoryId) + 1
+  var docScores = newSeq[float](maxId)
+  var touched = newSeq[uint64]()
 
   for token in qTokens:
     let corpusFreq = index.corpusTermFreqs.getOrDefault(token, 0'u64)
@@ -68,14 +73,21 @@ proc searchLexical*(index: LexicalIndex; query: string; k: int): seq[tuple[memor
 
     if index.postings.hasKey(token):
       for (mid, freq) in index.postings[token]:
-        docScores[mid] = docScores.getOrDefault(mid, 0.0) + ln(1.0 + float(freq) / denominator)
+        let slot = int(mid)
+        if slot < maxId:
+          if docScores[slot] == 0.0:
+            touched.add(mid)
+          docScores[slot] += ln(1.0 + float(freq) / denominator)
 
   var scored = newSeq[tuple[score: float, memoryId: uint64]]()
   let queryLen = float(qTokens.len)
-  for mid, termScore in docScores:
-    let memLen = float(index.memLengths.getOrDefault(mid, 0))
-    let finalScore = termScore + queryLen * ln(index.mu / (memLen + index.mu))
-    scored.add((finalScore, mid))
+  for mid in touched:
+    let slot = int(mid)
+    let termScore = docScores[slot]
+    if termScore > 0.0:
+      let memLen = float(index.memLengths.getOrDefault(mid, 0))
+      let finalScore = termScore + queryLen * ln(index.mu / (memLen + index.mu))
+      scored.add((finalScore, mid))
 
   scored.sort(proc(a, b: auto): int =
     if a.score > b.score: return -1
@@ -114,6 +126,7 @@ proc saveLexical*(index: LexicalIndex; path: string; walOffset: uint64 = 0) =
     discard f.writeBuffer(unsafeAddr len, 4)
   discard f.writeBuffer(unsafeAddr index.totalCorpusTokens, 8)
   discard f.writeBuffer(unsafeAddr index.mu, 8)
+  discard f.writeBuffer(unsafeAddr index.maxMemoryId, 8)
   f.close()
 
 proc loadLexical*(path: string; walOffset: var uint64): LexicalIndex =
@@ -154,4 +167,6 @@ proc loadLexical*(path: string; walOffset: var uint64): LexicalIndex =
     result.memLengths[mid] = len
   discard f.readBuffer(addr result.totalCorpusTokens, 8)
   discard f.readBuffer(addr result.mu, 8)
+  if not f.endOfFile:
+    discard f.readBuffer(addr result.maxMemoryId, 8)
   f.close()

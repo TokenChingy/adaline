@@ -25,13 +25,6 @@ suite "EngineConfig":
     let cfg = defaultEngineConfig()
     check cfg.lshBands * cfg.lshRows == 160
 
-  test "defaultEngineConfig has positive HNSW parameters":
-    let cfg = defaultEngineConfig()
-    check cfg.hnswMaxLayers > 0
-    check cfg.hnswMaxNeighbors > 0
-    check cfg.hnswEfConstruction > 0
-    check cfg.hnswEfSearch > 0
-
   test "defaultEngineConfig has semantic and lexical search enabled":
     let cfg = defaultEngineConfig()
     check cfg.semanticSearchEnabled == true

@@ -65,13 +65,9 @@ type
   StatsResult* = object
     memories*: int
     corpusMemories*: int
-    hnswLayers*: int
-    hnswEntryPoint*: uint64
     fingerprintBits*: int
     lshBands*: int
     lshRows*: int
-    hnswMaxLayers*: int
-    hnswEfSearch*: int
     rrfK*: int
     dirichletMu*: float
 
@@ -80,13 +76,9 @@ proc stats*(self: Engine): StatsResult {.exportpy.} =
   result = StatsResult(
     memories: self.service.textCache.len,
     corpusMemories: self.service.corpus.numMemories,
-    hnswLayers: self.service.maxHnswLayer + 1,
-    hnswEntryPoint: self.service.hnswEntryPoint,
     fingerprintBits: cfg.fingerprintBits,
     lshBands: cfg.lshBands,
     lshRows: cfg.lshRows,
-    hnswMaxLayers: cfg.hnswMaxLayers,
-    hnswEfSearch: cfg.hnswEfSearch,
     rrfK: cfg.rrfK,
     dirichletMu: cfg.dirichletMu
   )

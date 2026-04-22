@@ -162,8 +162,6 @@ proc cmdStats() =
   echo "Data directory: ", dataDir
   echo "Memories:       ", service.textCache.len
   echo "Corpus memories:", service.corpus.numMemories
-  echo "HNSW layers:    ", service.maxHnswLayer + 1
-  echo "HNSW entry:     ", service.hnswEntryPoint
   if service.timestampCache.len > 0:
     echo "Oldest memory:  ", formatTimestamp(oldestTs)
     echo "Newest memory:  ", formatTimestamp(newestTs)
@@ -172,8 +170,6 @@ proc cmdStats() =
   echo "  Bigrams:      ", cfg.bigramBits, " bits"
   echo "  Context:      ", cfg.contextBits, " bits"
   echo "LSH bands:      ", cfg.lshBands, " x ", cfg.lshRows, " rows"
-  echo "HNSW maxLayers: ", cfg.hnswMaxLayers
-  echo "HNSW efSearch:  ", cfg.hnswEfSearch
   echo "RRF k:          ", cfg.rrfK
   echo "Dirichlet mu:   ", cfg.dirichletMu
 

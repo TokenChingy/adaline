@@ -1,35 +1,32 @@
 ## Memory service initialisation.
 ## Creates or opens the memory-mapped storage (WAL, fingerprint store,
-## graph store, chunks store) and replays WAL and chunk mappings.
+## chunks store) and replays WAL and chunk mappings.
 
 
 import ./types
 import ../../entities/config
 import ../../entities/fingerprint
-import ../../entities/hnsw_node
 import ../../algorithms/fingerprint_lsh
 import ../../algorithms/lexical_index
 import ../../algorithms/corpus_index
 import ../../algorithms/chunker
 import ../../../infrastructure/mmapped_storage
-import std/[tables, random, os]
+import std/[tables, sets, strutils, random, os]
 
 export types
 export config
 
 proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig()): MemoryService =
   randomize()
-  result.storage = initStorage(dataDir, cfg.hnswMaxLayers, cfg.hnswMaxNeighbors)
+  result.storage = initStorage(dataDir)
   result.cfg = cfg
   result.lsh = initLshIndex(cfg)
   result.lexical = LexicalIndex(mu: cfg.dirichletMu)
   result.corpus = CorpusIndex()
-  result.maxHnswLayer = -1
-  result.hnswEntryPoint = 0
   result.textCache = initTable[uint64, string]()
+  result.tokenCache = initTable[uint64, HashSet[string]]()
   result.timestampCache = initTable[uint64, uint64]()
   result.chunkToParent = initTable[uint64, uint64]()
-  result.hnswReverseIndex = initTable[uint64, seq[uint64]]()
 
   let lshPath = dataDir / "lsh.bin"
   let lexicalPath = dataDir / "lexical.bin"
@@ -67,6 +64,10 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   var walPos: uint64 = 0
   for (parentId, timestamp, text) in entries:
     result.textCache[parentId] = text
+    result.tokenCache[parentId] = initHashSet[string]()
+    for token in text.toLowerAscii().split(AllChars - Letters - Digits):
+      if token.len > 0:
+        result.tokenCache[parentId].incl(token)
     result.timestampCache[parentId] = timestamp
     if parentId > maxId:
       maxId = parentId
@@ -96,22 +97,5 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
         result.storage.readFingerprint(chunkId, addr fp)
         insertLsh(result.lsh, addr fp, chunkId)
 
-    for i in 0 ..< numChunks:
-      let chunkId = effectiveChunkIds[i]
-      let node = result.storage.getHnswNodeView(chunkId)
-      if node.layerCount > 0:
-        let layer = int(node.entryLayer)
-        if layer > result.maxHnswLayer:
-          result.maxHnswLayer = layer
-          result.hnswEntryPoint = chunkId
-
   if hasData:
     result.storage.syncRecordCount(maxId + 1)
-
-  let idCount = result.storage.recordCount
-  for id in 0'u64 ..< idCount:
-    let node = result.storage.getHnswNodeView(id)
-    if node.layerCount > 0:
-      for lc in 0 ..< int(node.layerCount):
-        for nid in node.neighbors(lc):
-          result.hnswReverseIndex.mgetOrPut(nid, @[]).add(id)

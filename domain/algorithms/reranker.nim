@@ -13,26 +13,22 @@ proc tokenize*(text: string): seq[string] =
     if token.len > 0:
       result.add(token)
 
-proc coverageBoost*(query, doc: string): float =
-  let qTokens = tokenize(query)
-  let dTokens = tokenize(doc)
+proc coverageBoost*(qTokens: seq[string]; docTokens: HashSet[string]): float =
   if qTokens.len == 0:
     return 0.0
-  var dSet = initHashSet[string]()
-  for t in dTokens:
-    dSet.incl(t)
   var covered = 0
   for t in qTokens:
-    if t in dSet:
+    if t in docTokens:
       covered.inc
   return float(covered) / float(qTokens.len)
 
-proc rerank*(query: string; candidates: var seq[Memory]; textCache: Table[uint64, string]; cfg: EngineConfig) =
+proc rerank*(query: string; candidates: var seq[Memory]; tokenCache: Table[uint64, HashSet[string]]; cfg: EngineConfig) =
   if candidates.len == 0:
     return
+  let qTokens = tokenize(query)
   for mem in candidates.mitems:
-    let docText = textCache.getOrDefault(mem.id, "")
-    let cov = coverageBoost(query, docText)
+    let docTokens = tokenCache.getOrDefault(mem.id, initHashSet[string]())
+    let cov = coverageBoost(qTokens, docTokens)
     mem.score = mem.score + cfg.rerankCoverageWeight * cov
   candidates.sort(proc(a, b: Memory): int =
     if a.score > b.score: return -1

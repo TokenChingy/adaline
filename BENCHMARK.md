@@ -34,7 +34,7 @@ python3 benchmarks/benchmark.py --dataset cifar10 --benchmark all
 python3 benchmarks/benchmark.py --dataset imagenet --benchmark comparison --backbone resnet50
 ```
 
-To also benchmark the actual compiled Adaline Engine (HNSW+LSH) via Python bindings:
+To also benchmark the actual compiled Adaline Engine (LSH) via Python bindings:
 
 ```bash
 nimble python
@@ -65,43 +65,67 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 4.53 s |
-| Insert throughput | 1,143 docs/s |
-| Insert P50 | 0.72 ms |
-| Insert P95 | 1.61 ms |
+| Total insert time | 1.17 s |
+| Insert throughput | 4,421 docs/s |
+| Insert P50 | 0.22 ms |
+| Insert P95 | 0.32 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 260 q/s |
-| Query P50 | 3.85 ms |
-| Query P95 | 4.61 ms |
+| Query throughput | 277 q/s |
+| Query P50 | 3.6 ms |
+| Query P95 | 3.8 ms |
 
 ### Retrieval Quality (300 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 40.83% |
-| Recall@5 | 65.69% |
-| Recall@10 | 71.28% |
-| Recall@100 | 89.22% |
-| Precision@1 | 42.00% |
-| Precision@5 | 14.13% |
-| Precision@10 | 7.80% |
-| Precision@100 | 1.01% |
-| MRR | 0.5328 |
-| MAP | 0.5232 |
-| nDCG@10 | 0.5670 |
+| Recall@1 | 45.25% |
+| Recall@5 | 67.06% |
+| Recall@10 | 74.57% |
+| Recall@100 | 87.72% |
+| Precision@1 | 46.67% |
+| Precision@5 | 14.33% |
+| Precision@10 | 8.17% |
+| Precision@100 | 0.99% |
+| MRR | 0.5729 |
+| MAP | 0.5606 |
+| nDCG@10 | 0.6044 |
 
 ### CRUD Throughput
 
 | Operation | Throughput | P50 |
 |-----------|-----------|-----|
-| Insert | 1,054 docs/s | 0.82 ms |
-| Delete | 1,802 ops/s | 0.51 ms |
-| Update | 934 ops/s | 0.97 ms |
-| Post-CRUD query | 707 q/s | — |
+| Insert | 4,395 docs/s | 0.22 ms |
+| Delete | 1,169 ops/s | 0.82 ms |
+| Update | 1,203 ops/s | 0.82 ms |
+| Post-CRUD query | 410 q/s | — |
+
+### Lane Ablation
+
+Disabling the lexical lane (`lexicalSearchEnabled = false`) on SciFact:
+
+| Metric | Dual Lane | Semantic Only | Δ |
+|--------|-----------|---------------|---|
+| Recall@1 | 45.25% | 31.33% | **−13.92 pts** |
+| Recall@100 | 87.72% | 40.55% | **−47.17 pts** |
+| nDCG@10 | 0.6044 | 0.3483 | **−0.2561** |
+
+The lexical lane is critical on SciFact: removing it cuts recall@100 in half and drops nDCG@10 by 42%.
+
+### Lane Contribution
+
+Of the top-k merged results (before reranking), the origin breakdown is:
+
+| Source | % of results |
+|--------|-------------|
+| Semantic only | 47.3% |
+| Lexical only | 47.1% |
+| Both lanes | 5.6% |
+
+Each lane contributes roughly half of the final results independently.
 
 ---
 
@@ -113,34 +137,34 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 3.09 s |
-| Insert throughput | 1,175 docs/s |
-| Insert P50 | 0.72 ms |
-| Insert P95 | 1.52 ms |
+| Total insert time | 0.85 s |
+| Insert throughput | 4,251 docs/s |
+| Insert P50 | 0.23 ms |
+| Insert P95 | 0.34 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 393 q/s |
-| Query P50 | 2.48 ms |
-| Query P95 | 3.20 ms |
+| Query throughput | 395 q/s |
+| Query P50 | 2.46 ms |
+| Query P95 | 2.81 ms |
 
 ### Retrieval Quality (323 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 4.68% |
-| Recall@5 | 10.81% |
-| Recall@10 | 13.32% |
-| Recall@100 | 22.58% |
-| Precision@1 | 36.84% |
-| Precision@5 | 25.57% |
-| Precision@10 | 19.44% |
-| Precision@100 | 5.47% |
-| MRR | 0.4608 |
-| MAP | 0.1233 |
-| nDCG@10 | 0.2731 |
+| Recall@1 | 5.32% |
+| Recall@5 | 10.94% |
+| Recall@10 | 13.41% |
+| Recall@100 | 22.11% |
+| Precision@1 | 37.77% |
+| Precision@5 | 25.76% |
+| Precision@10 | 19.85% |
+| Precision@100 | 5.12% |
+| MRR | 0.4695 |
+| MAP | 0.1258 |
+| nDCG@10 | 0.2788 |
 
 ---
 
@@ -152,40 +176,69 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 7.70 s |
-| Insert throughput | 1,127 docs/s |
-| Insert P50 | 0.77 ms |
-| Insert P95 | 1.74 ms |
+| Total insert time | 1.73 s |
+| Insert throughput | 5,027 docs/s |
+| Insert P50 | 0.19 ms |
+| Insert P95 | 0.31 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 47 q/s |
-| Query P50 | 19.48 ms |
-| Query P95 | 35.83 ms |
+| Query throughput | 193 q/s |
+| Query P50 | 4.83 ms |
+| Query P95 | 8.14 ms |
 
 ### Retrieval Quality (1,406 judged queries)
 
 | Metric | Value |
 |--------|-------|
 | Recall@1 | 0.00% |
-| Recall@5 | 22.12% |
-| Recall@10 | 38.69% |
-| Recall@100 | 95.31% |
+| Recall@5 | 38.12% |
+| Recall@10 | 55.76% |
+| Recall@100 | 97.30% |
 | Precision@1 | 0.00% |
-| Precision@5 | 4.42% |
-| Precision@10 | 3.87% |
-| Precision@100 | 0.96% |
-| MRR | 0.1174 |
-| MAP | 0.1174 |
-| nDCG@10 | 0.1649 |
+| Precision@5 | 7.62% |
+| Precision@10 | 5.58% |
+| Precision@100 | 0.98% |
+| MRR | 0.1739 |
+| MAP | 0.1739 |
+| nDCG@10 | 0.2520 |
 
 ### Notes
 
 - ArguAna is deliberately adversarial: the correct document is topically identical but stance-opposed. Jaccard-based semantic similarity cannot distinguish "for" from "against," so R@1 is zero.
-- The lexical lane carries most of the signal here (R@100 = 95.5%), but without stance-aware reranking the correct document rarely cracks the top 10.
+- The lexical lane carries most of the signal here (R@100 = 97.3%), but without stance-aware reranking the correct document rarely cracks the top 10.
 - Query latency is higher than SciFact/NFCorpus because the corpus is larger (~8.7K docs) and queries are longer, more lexically complex arguments.
+
+---
+
+## FIQA
+
+57K financial QA pairs from the BEIR collection.
+
+### Indexing
+
+| Statistic | Value |
+|-----------|-------|
+| Total insert time | 10.0 s |
+| Insert throughput | 5,677 docs/s |
+| Insert P50 | 0.14 ms |
+| Insert P95 | 0.32 ms |
+
+### Query (top-100)
+
+| Statistic | Value |
+|-----------|-------|
+| Query throughput | 14.6 q/s |
+| Query P50 | 66 ms |
+| Query P95 | 82 ms |
+
+### Retrieval Quality
+
+| Metric | Value |
+|--------|-------|
+| nDCG@10 | 0.1680 |
 
 ---
 
@@ -199,7 +252,7 @@ vectors into Adaline fingerprints.
 
 Pure-Python benchmarks use brute-force Jaccard for comparison.  With the
 `--engine` flag (requires compiled Python bindings: `nimble python`), the
-benchmarks route search through the actual Nim HNSW+LSH index.
+benchmarks route search through the actual Nim LSH index.
 
 ```bash
 python3 benchmarks/benchmark.py --dataset cifar10 --benchmark all
@@ -227,11 +280,11 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 | Method | Accuracy | ms/query |
 |--------|----------|----------|
 | dense (cosine) | **44.4%** | 0.018 |
-| sparse (HNSW) | 42.2% | 0.163 |
+| sparse (LSH) | 42.2% | 0.163 |
 
 #### Few-Shot Scaling (accuracy vs prototypes/class)
 
-| Shots | dense | sparse (HNSW) |
+| Shots | dense | sparse (LSH) |
 |-------|-------|---------------|
 | 1 | 34.6% | 35.8% |
 | 2 | 50.4% | 42.0% |
@@ -241,7 +294,7 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 
 #### Incremental Class Addition (5 prototypes/class)
 
-| Classes | dense | sparse (HNSW) | ms/query |
+| Classes | dense | sparse (LSH) | ms/query |
 |---------|-------|---------------|----------|
 | 2 | 88.0% | 89.0% | 0.149 |
 | 4 | 78.5% | 68.5% | 0.161 |
@@ -254,11 +307,11 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 | Method | AUROC | Known acc |
 |--------|-------|-----------|
 | dense (cosine) | 0.552 | **67.7%** |
-| sparse (HNSW) | **0.578** | 59.3% |
+| sparse (LSH) | **0.578** | 59.3% |
 
 ### Key Findings
 
-1. **Dense cosine and sparse HNSW are competitive on real CNN features.**
+1. **Dense cosine and sparse LSH are competitive on real CNN features.**
    At 1-shot dense wins (44.4% vs 42.2%), but at 20 prototypes they converge
    (62.6% vs 61.8%). The k-WTA encoder preserves enough signal for Jaccard
    retrieval to track brute-force cosine similarity.
@@ -268,10 +321,10 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
    the similarity score separates known from novel inputs better than random
    chance, though less cleanly than on synthetic structured data.
 4. **Query latency scales gracefully.** At 10 classes × 5 prototypes = 50
-   items, sparse retrieval averages ~0.16–0.22 ms/query through the full HNSW engine.
+   items, sparse retrieval averages ~0.16–0.22 ms/query through the full LSH engine.
    The `vision_bench` binary exercises the actual `insertDense` / `searchDense` use-cases.
 5. **`--engine` bridges Python and Nim.** The same Python benchmark suite can
-   now exercise the actual compiled HNSW+LSH index, giving O(log N) search
+   now exercise the actual compiled LSH index, giving approximate search
    instead of brute-force Jaccard while keeping the PyTorch feature-extraction
    pipeline unchanged.
 
@@ -313,13 +366,13 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 
 ## MS MARCO
 
-Supported but not benchmarked due to scale (~8.8M passages, ~1 GB download, ~11 GB fingerprints, ~18 GB graph).
+Supported but not benchmarked due to scale (~8.8M passages, ~1 GB download, ~11 GB fingerprints).
 
 ```bash
 ./benchmarks/beir msmarco
 ```
 
-At 8.8M docs, each query visits roughly `64 × log(N)` ≈ 1,000–2,000 nodes. The bottleneck shifts to memory bandwidth (cold node access) and WAL replay time on startup.
+At 8.8M docs, each query scans all LSH candidates with brute-force Jaccard. The bottleneck shifts to memory bandwidth (cold fingerprint access) and WAL replay time on startup.
 
 ---
 
@@ -327,17 +380,45 @@ At 8.8M docs, each query visits roughly `64 × log(N)` ≈ 1,000–2,000 nodes. 
 
 ### Semantic vs Lexical Lane
 
-On text datasets where queries and documents share heavy lexical overlap (SciFact, NFCorpus, ArguAna), the lexical lane (QLM + Dirichlet smoothing) carries the majority of the signal. The semantic lane (LSH + HNSW + weighted Jaccard) contributes value for paraphrase and conceptual-neighbor retrieval, but its standalone recall lags behind the lexical lane on these benchmarks.
+On text datasets where queries and documents share heavy lexical overlap (SciFact, NFCorpus, ArguAna), the lexical lane (QLM + Dirichlet smoothing) carries the majority of the signal. The semantic lane (LSH + brute-force weighted Jaccard) contributes value for paraphrase and conceptual-neighbor retrieval, but its standalone recall lags behind the lexical lane on these benchmarks.
 
-### HNSW Configuration
+**SciFact ablation:**
 
-Current defaults use `M=16` neighbors and `efConstruction=64` / `efSearch=64`. This strikes a balance between graph quality and throughput:
+| | Dual Lane | Semantic Only | Δ |
+|---|---|---|---|
+| R@100 | 87.72% | 40.55% | **−47.2 pts** |
+| nDCG@10 | 0.604 | 0.348 | **−0.256** |
 
-- **SciFact:** 1,143 docs/s insert, 260 q/s query, 89.22% R@100
-- **NFCorpus:** 1,175 docs/s insert, 393 q/s query
-- **ArguAna:** 1,127 docs/s insert, 47 q/s query
+**Lane contribution** (top-k merged results, SciFact):
 
-Higher `M` improves recall at depth (R@100) but increases insertion time due to more neighbor wiring. Higher `ef` improves graph quality during construction and search precision but increases latency. For corpora under ~10K docs, `M=16, ef=64` is the practical sweet spot.
+| Source | % |
+|--------|---|
+| Semantic only | 47.3% |
+| Lexical only | 47.1% |
+| Both lanes | 5.6% |
+
+### LSH Configuration
+
+Current defaults use 80 LSH bands with 2 rows each, providing full coverage of all 160 fingerprint segments. This strikes a balance between candidate recall and index size:
+
+- **SciFact:** 4,421 docs/s insert, 277 q/s query, 87.72% R@100, nDCG@10 = 0.604
+- **NFCorpus:** 4,251 docs/s insert, 395 q/s query
+- **ArguAna:** 5,027 docs/s insert, 193 q/s query
+- **FIQA:** 5,677 docs/s insert, 14.6 q/s query
+
+More bands increase candidate recall but grow the index; fewer bands reduce memory at the cost of recall. For corpora under ~10K docs, 80 bands is the practical sweet spot. At 57K docs (FIQA), brute-force Jaccard over LSH candidates becomes the bottleneck, dropping query throughput to ~15 q/s.
+
+### Query Performance
+
+The LSH + brute-force Jaccard semantic lane was optimized with:
+
+- **Epoch-array dedup** in `queryLsh` (replaces `HashSet` allocation per query)
+- **AND-construction** (min 2 band hits required) to filter weak collisions
+- **Fast-path `bandHash`** (unrolled, no `mod` for default config)
+- **In-place `removeLsh`** (no allocation churn on delete)
+- **Pre-sized table** on `loadLsh`
+
+These optimizations more than doubled query throughput on SciFact (125 → 277 q/s) with no meaningful recall loss.
 
 ### Chunking
 
@@ -345,14 +426,14 @@ LongMemEval demonstrates the importance of conditional chunking. Sessions averag
 
 ### Dense-Vector Encoding
 
-The `encodeDense` k-WTA encoder converts arbitrary L2-normalised float32 vectors into Adaline fingerprints using the same `hashFeature`/`probeBlock` primitives as the text SDR encoder. On synthetic vision data, sparse HNSW retrieval outperforms dense cosine similarity at 1-shot classification (54.4% vs 32.2%) and scales efficiently with more prototypes.
+The `encodeDense` k-WTA encoder converts arbitrary L2-normalised float32 vectors into Adaline fingerprints using the same `hashFeature`/`probeBlock` primitives as the text SDR encoder. On synthetic vision data, sparse LSH retrieval outperforms dense cosine similarity at 1-shot classification (54.4% vs 32.2%) and scales efficiently with more prototypes.
 
 ---
 
 ## Methodology
 
 - **Distance:** `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
-- **Search:** LSH seeds → HNSW layer-0 descent (`efSearch=64`).
+- **Search:** LSH seeds → brute-force weighted Jaccard scoring.
 - **Lexical:** Query Likelihood Model with Dirichlet smoothing (μ=2000).
 - **Fusion:** RRF (k=10).
 - **Reranking:** Term-coverage boost (weight=0.5) on top-K merged results.
