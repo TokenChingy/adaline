@@ -18,7 +18,7 @@ export config
 
 proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig()): MemoryService =
   randomize()
-  result.storage = initStorage(dataDir)
+  result.storage = initStorage(dataDir, cfg.hnswMaxLayers, cfg.hnswMaxNeighbors)
   result.cfg = cfg
   result.lsh = initLshIndex(cfg)
   result.lexical = LexicalIndex(mu: cfg.dirichletMu)
@@ -96,7 +96,7 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
 
     for i in 0 ..< numChunks:
       let chunkId = effectiveChunkIds[i]
-      let node = result.storage.getHnswNodePtr(chunkId)
+      let node = result.storage.getHnswNodeView(chunkId)
       if node.layerCount > 0:
         let layer = int(node.entryLayer)
         if layer > result.maxHnswLayer:
@@ -108,7 +108,7 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
 
   let idCount = result.storage.recordCount
   for id in 0'u64 ..< idCount:
-    let node = result.storage.getHnswNodePtr(id)
+    let node = result.storage.getHnswNodeView(id)
     if node.layerCount > 0:
       for lc in 0 ..< int(node.layerCount):
         for nid in node.neighbors(lc):

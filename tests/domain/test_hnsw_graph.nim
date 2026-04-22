@@ -48,7 +48,7 @@ suite "HNSW graph":
     copyMem(cast[pointer](cast[uint](fpMem) + FingerprintBytes), addr fp1, FingerprintBytes)
 
     insertHnsw(graphMem, fpMem, 1'u64, cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + FingerprintBytes)),
-               cfg, maxLayer, entryPoint, reverseIndex)
+               cfg, maxLayer, entryPoint, reverseIndex, uint64(sizeof(HnswNode)))
 
     check entryPoint == 1'u64
     check maxLayer >= 0
@@ -77,7 +77,7 @@ suite "HNSW graph":
       let offset = id * uint64(FingerprintBytes)
       copyMem(cast[pointer](cast[uint](fpMem) + uint(offset)), addr fp, FingerprintBytes)
       insertHnsw(graphMem, fpMem, id, cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset))),
-                 cfg, maxLayer, entryPoint, reverseIndex)
+                 cfg, maxLayer, entryPoint, reverseIndex, uint64(sizeof(HnswNode)))
 
     let node2 = getHnswNodePtr(graphMem, 2'u64)
     check node2.layerCount > 0
@@ -109,14 +109,15 @@ suite "HNSW graph":
       let offset = id * uint64(FingerprintBytes)
       copyMem(cast[pointer](cast[uint](fpMem) + uint(offset)), addr fp, FingerprintBytes)
       insertHnsw(graphMem, fpMem, id, cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset))),
-                 cfg, maxLayer, entryPoint, reverseIndex)
+                 cfg, maxLayer, entryPoint, reverseIndex, uint64(sizeof(HnswNode)))
 
     var qfp = initFingerprint()
     for b in 0 ..< 50:
       setBit(qfp, b)
     setBit(qfp, 30)
 
-    let results = searchHnsw(graphMem, fpMem, @[], entryPoint, addr qfp, 3, cfg)
+    let results = searchHnsw(graphMem, fpMem, @[], entryPoint, addr qfp, 3, cfg,
+                             uint64(sizeof(HnswNode)))
     check results.len > 0
     check results[0].score > 0.0
 
@@ -152,7 +153,8 @@ suite "HNSW graph":
     setBit(qfp, 0)
     setBit(qfp, 1)
 
-    let results = searchLayer(graphMem, fpMem, addr qfp, 1'u64, 0, 10, cfg)
+    let results = searchLayer(graphMem, fpMem, addr qfp, 1'u64, 0, 10, cfg,
+                              uint64(sizeof(HnswNode)))
     check results.len >= 1
     check results[0].id == 1'u64
     for i in 1 ..< results.len:

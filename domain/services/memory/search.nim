@@ -24,7 +24,8 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
     let lshSeeds = queryLsh(service.lsh, addr qfp)
     if service.hnswEntryPoint != 0 or lshSeeds.len > 0:
       semanticResults = searchHnsw(service.storage.graphMem, service.storage.fpMem,
-                                   lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg)
+                                   lshSeeds, service.hnswEntryPoint, addr qfp, k, service.cfg,
+                                   service.storage.graphRecordSize)
 
   var lexicalResults = newSeq[tuple[memoryId: uint64, score: float]]()
   if service.cfg.lexicalSearchEnabled:

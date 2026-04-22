@@ -45,7 +45,7 @@ proc updateMemory*(service: var MemoryService; parentId: uint64; content: string
     addMemory(service.lexical, chunkId, content)
     insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
                service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-               service.hnswReverseIndex)
+               service.hnswReverseIndex, storage.graphRecordSize)
   else:
     for chunkText in chunks:
       let chunkId = storage.allocId()
@@ -58,4 +58,4 @@ proc updateMemory*(service: var MemoryService; parentId: uint64; content: string
       addMemory(service.lexical, chunkId, chunkText)
       insertHnsw(storage.graphMem, storage.fpMem, chunkId, addr fp,
                  service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-                 service.hnswReverseIndex)
+                 service.hnswReverseIndex, storage.graphRecordSize)

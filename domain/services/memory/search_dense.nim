@@ -14,4 +14,5 @@ proc searchDense*(service: var MemoryService; vec: seq[float32]; topK: int): seq
   let seeds = queryLsh(service.lsh, addr qfp)
   if service.hnswEntryPoint != 0 or seeds.len > 0:
     result = searchHnsw(service.storage.graphMem, service.storage.fpMem,
-                        seeds, service.hnswEntryPoint, addr qfp, topK, service.cfg)
+                        seeds, service.hnswEntryPoint, addr qfp, topK, service.cfg,
+                        service.storage.graphRecordSize)

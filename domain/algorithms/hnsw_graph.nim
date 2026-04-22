@@ -2,6 +2,9 @@
 ## Construction, greedy best-first search, and neighbor selection
 ## for sparse fingerprint vectors using weighted Jaccard distance.
 ## Includes layer assignment, edge wiring, and graph healing on delete.
+##
+## This module now uses ``HnswNodeView`` so that the on-disk record size
+## can vary with the runtime ``hnswMaxLayers`` / ``hnswMaxNeighbors`` config.
 
 
 import ../entities/fingerprint
@@ -14,6 +17,13 @@ proc getFingerprintPtr*(fpMem: pointer; memoryId: uint64): ptr Fingerprint {.inl
   let offset = memoryId * uint64(FingerprintBytes)
   cast[ptr Fingerprint](cast[pointer](cast[uint](fpMem) + uint(offset)))
 
+proc getHnswNodeView*(graphMem: pointer; memoryId: uint64;
+                      graphRecordSize: uint64; maxNeighbors: int): HnswNodeView {.inline.} =
+  let offset = memoryId * graphRecordSize
+  let p = cast[pointer](cast[uint](graphMem) + uint(offset))
+  makeView(p, maxNeighbors, HnswMaxLayers)
+
+# Backward-compatible wrapper for tests that still use compile-time max size.
 proc getHnswNodePtr*(graphMem: pointer; memoryId: uint64): ptr HnswNode {.inline.} =
   let offset = memoryId * uint64(sizeof(HnswNode))
   cast[ptr HnswNode](cast[pointer](cast[uint](graphMem) + uint(offset)))
@@ -29,7 +39,7 @@ type
   MaxItem = tuple[negDist: float, id: uint64]
 
 proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: uint64;
-                  layer, ef: int; cfg: EngineConfig): seq[tuple[id: uint64, dist: float]] =
+                  layer, ef: int; cfg: EngineConfig; graphRecordSize: uint64): seq[tuple[id: uint64, dist: float]] =
   var visited = initHashSet[uint64]()
   var candidates = initHeapQueue[MinItem]()
   var results = initHeapQueue[MaxItem]()
@@ -48,7 +58,7 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
     if results.len > ef:
       discard results.pop()
 
-    let node = getHnswNodePtr(graphMem, curr.id)
+    let node = getHnswNodeView(graphMem, curr.id, graphRecordSize, cfg.hnswMaxNeighbors)
     for nid in node.neighbors(layer):
       if nid notin visited:
         visited.incl(nid)
@@ -65,8 +75,8 @@ proc searchLayer*(graphMem, fpMem: pointer; queryFp: ptr Fingerprint; entryId: u
 
 proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint;
                  cfg: EngineConfig; maxLayer: var int; entryPoint: var uint64;
-                 reverseIndex: var Table[uint64, seq[uint64]]) =
-  let node = getHnswNodePtr(graphMem, memoryId)
+                 reverseIndex: var Table[uint64, seq[uint64]]; graphRecordSize: uint64) =
+  let node = getHnswNodeView(graphMem, memoryId, graphRecordSize, cfg.hnswMaxNeighbors)
   clearNode(node)
 
   let layer = randomLevel(cfg.hnswMaxLayers - 1)
@@ -80,12 +90,12 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
 
   var currEp = entryPoint
   for lc in countdown(maxLayer, layer + 1):
-    let neighbors = searchLayer(graphMem, fpMem, fp, currEp, lc, 1, cfg)
+    let neighbors = searchLayer(graphMem, fpMem, fp, currEp, lc, 1, cfg, graphRecordSize)
     if neighbors.len > 0:
       currEp = neighbors[0].id
 
   for lc in countdown(layer, 0):
-    let neighbors = searchLayer(graphMem, fpMem, fp, currEp, lc, cfg.hnswEfConstruction, cfg)
+    let neighbors = searchLayer(graphMem, fpMem, fp, currEp, lc, cfg.hnswEfConstruction, cfg, graphRecordSize)
     var selected = newSeq[uint64]()
     for i in 0 ..< min(neighbors.len, cfg.hnswMaxNeighbors):
       selected.add(neighbors[i].id)
@@ -95,7 +105,7 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
       reverseIndex.mgetOrPut(nid, @[]).add(memoryId)
 
     for nid in selected:
-      let nnode = getHnswNodePtr(graphMem, nid)
+      let nnode = getHnswNodeView(graphMem, nid, graphRecordSize, cfg.hnswMaxNeighbors)
       var oldNeighbors = newSeq[uint64]()
       for nnid in nnode.neighbors(lc):
         oldNeighbors.add(nnid)
@@ -145,7 +155,7 @@ proc insertHnsw*(graphMem, fpMem: pointer; memoryId: uint64; fp: ptr Fingerprint
     entryPoint = memoryId
 
 proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint64;
-                 queryFp: ptr Fingerprint; k: int; cfg: EngineConfig): seq[tuple[memoryId: uint64, score: float]] =
+                 queryFp: ptr Fingerprint; k: int; cfg: EngineConfig; graphRecordSize: uint64): seq[tuple[memoryId: uint64, score: float]] =
   var allResults = initTable[uint64, float]()
 
   for seed in seeds:
@@ -155,16 +165,16 @@ proc searchHnsw*(graphMem, fpMem: pointer; seeds: seq[uint64]; entryPoint: uint6
       allResults[seed] = score
 
   if entryPoint != 0:
-    let entryNode = getHnswNodePtr(graphMem, entryPoint)
+    let entryNode = getHnswNodeView(graphMem, entryPoint, graphRecordSize, cfg.hnswMaxNeighbors)
     let maxLayer = int(entryNode.entryLayer)
     var currEp = entryPoint
 
     for lc in countdown(maxLayer, 1):
-      let neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, lc, 1, cfg)
+      let neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, lc, 1, cfg, graphRecordSize)
       if neighbors.len > 0:
         currEp = neighbors[0].id
 
-    let layer0Neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, 0, cfg.hnswEfSearch, cfg)
+    let layer0Neighbors = searchLayer(graphMem, fpMem, queryFp, currEp, 0, cfg.hnswEfSearch, cfg, graphRecordSize)
     for (nid, dist) in layer0Neighbors:
       let score = 1.0 - dist
       if not allResults.hasKey(nid) or score > allResults[nid]:

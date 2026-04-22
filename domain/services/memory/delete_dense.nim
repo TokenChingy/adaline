@@ -16,7 +16,7 @@ proc deleteDense*(service: var MemoryService; memoryId: uint64) =
   if service.textCache.hasKey(memoryId) or service.chunkToParent.hasKey(memoryId):
     return
 
-  let node = service.storage.getHnswNodePtr(memoryId)
+  let node = service.storage.getHnswNodeView(memoryId)
   if node.layerCount > 0:
     # Remove this node from all predecessors' neighbor lists
     for lc in 0 ..< int(node.layerCount):
@@ -27,7 +27,7 @@ proc deleteDense*(service: var MemoryService; memoryId: uint64) =
     # Remove all predecessors from this node's neighbor lists
     if service.hnswReverseIndex.hasKey(memoryId):
       for mid in service.hnswReverseIndex[memoryId]:
-        let mnode = service.storage.getHnswNodePtr(mid)
+        let mnode = service.storage.getHnswNodeView(mid)
         if mnode.layerCount > 0:
           for lc in 0 ..< int(mnode.layerCount):
             discard removeNeighbor(mnode, lc, memoryId)
@@ -38,7 +38,7 @@ proc deleteDense*(service: var MemoryService; memoryId: uint64) =
       var newEp: uint64 = 0
       var newMaxLayer = -1
       for i in 1'u64 ..< service.storage.idCount():
-        let n = service.storage.getHnswNodePtr(i)
+        let n = service.storage.getHnswNodeView(i)
         if n.layerCount > 0 and int(n.entryLayer) > newMaxLayer:
           newMaxLayer = int(n.entryLayer)
           newEp = i

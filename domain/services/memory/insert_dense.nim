@@ -19,5 +19,5 @@ proc insertDense*(service: var MemoryService; vec: seq[float32]): uint64 =
   insertLsh(service.lsh, addr fp, id)
   insertHnsw(service.storage.graphMem, service.storage.fpMem, id, addr fp,
              service.cfg, service.maxHnswLayer, service.hnswEntryPoint,
-             service.hnswReverseIndex)
+             service.hnswReverseIndex, service.storage.graphRecordSize)
   result = id

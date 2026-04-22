@@ -28,7 +28,7 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
     chunkIds.add(parentId)
 
   for chunkId in chunkIds:
-    let node = service.storage.getHnswNodePtr(chunkId)
+    let node = service.storage.getHnswNodeView(chunkId)
     if node.layerCount > 0:
       for lc in 0 ..< int(node.layerCount):
         for nid in node.neighbors(lc):
@@ -37,7 +37,7 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
 
       if service.hnswReverseIndex.hasKey(chunkId):
         for mid in service.hnswReverseIndex[chunkId]:
-          let mnode = service.storage.getHnswNodePtr(mid)
+          let mnode = service.storage.getHnswNodeView(mid)
           if mnode.layerCount > 0:
             for lc in 0 ..< int(mnode.layerCount):
               discard removeNeighbor(mnode, lc, chunkId)
@@ -47,7 +47,7 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
         var newEp: uint64 = 0
         var newMaxLayer = -1
         for i in 1'u64 ..< service.storage.idCount():
-          let n = service.storage.getHnswNodePtr(i)
+          let n = service.storage.getHnswNodeView(i)
           if n.layerCount > 0 and int(n.entryLayer) > newMaxLayer:
             newMaxLayer = int(n.entryLayer)
             newEp = i
