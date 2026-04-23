@@ -28,7 +28,20 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
       |
       v
   +------------------+
-  | Dynamic Chunking |----> chunks.bin (parent->chunk mapping)
+  | Update caches    |
+  | (text, tokens,   |
+  |  timestamp)      |
+  +------------------+
+      |
+      v
+  +------------------+
+  | Corpus Index     |
+  | (IDF tracking)   |
+  +------------------+
+      |
+      v
+  +------------------+
+  | Dynamic Chunking |
   +------------------+
       |
       v
@@ -38,24 +51,29 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
   |  XOR-context)    |
   +------------------+
       |
+      v
+  +------------------+     +------------------+
+  | Per chunk:       |---->| chunks.bin       |
+  | writeFingerprint |     | (parent->chunk)  |
+  +------------------+     +------------------+
+      |
       +------------------+
       |                  |
       v                  v
   +--------+      +-------------+
   | LSH    |      | Lexical     |
-  | (80    |      | Index (QLM  |
-  |  bands)|      | + Dirichlet)|
+  | Insert |      | Index       |
   +--------+      +-------------+
-      |                  |
-      v                  v
-  lsh.bin          lexical.bin
 ```
 
 1. **Allocate & Log:** `allocId()` fetches a slot from the freelist. The record `(memoryId, timestamp, textLen, text)` is appended to `wal.bin` and flushed instantly.
-2. **Dynamic Chunking:** The engine estimates saturation for the token, character-bigram, and XOR-context blocks. If any block hits the `chunkSaturationThreshold` (60%), the text is split on sentence boundaries with a one-sentence overlap.
-3. **Encoding:** Each chunk is encoded into a 10,240-bit fingerprint. Probe counts are scaled by IDF-squared (rare tokens get more probes; stopwords get fewer).
-4. **LSH Routing (Semantic):** The fingerprint is partitioned into 80 bands of 2 rows for GoldFinger-style direct banding, inserting the chunk into the `lsh.bin` buckets.
-5. **Lexical Routing:** Text is tokenized on non-alphanumeric boundaries and added to the inverted index using Query Likelihood with Dirichlet smoothing ($\mu = 2000$).
+2. **Update Caches:** The raw text, token set, and timestamp are stored in in-memory tables (`textCache`, `tokenCache`, `timestampCache`).
+3. **Corpus Index:** The text is tokenized and its document frequencies are added to the global corpus index, which drives IDF-squared probe scaling.
+4. **Dynamic Chunking:** The engine estimates saturation for the token, character-bigram, and XOR-context blocks. If any block hits the `chunkSaturationThreshold` (60%), the text is split on sentence boundaries with a one-sentence overlap.
+5. **Encoding:** Each chunk is encoded into a 10,240-bit fingerprint. Probe counts are scaled by IDF-squared (rare tokens get more probes; stopwords get fewer).
+6. **Store & Map:** Each chunk is compressed and written to `fingerprints.bin` at a new byte offset (recorded in `fingerprints.idx`), and its parent→chunk linkage is appended to `chunks.bin`.
+7. **LSH Routing (Semantic):** The fingerprint is partitioned into 80 bands of 2 rows for GoldFinger-style direct banding, inserting the chunk into the in-memory LSH buckets.
+8. **Lexical Routing:** Text is tokenized on non-alphanumeric boundaries and added to the inverted index using Query Likelihood with Dirichlet smoothing ($\mu = 2000$).
 
 ### 2. Search & Retrieval (Text)
 
@@ -69,18 +87,19 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
   +------------------+
       |
       +----------+----------+
-      |          |          |
-      v          v          v
-  +--------+            +--------+
-  | LSH    |            | Lexical|
-  | Seeds  |            | Index  |
-  +--------+            +--------+
       |                     |
       v                     v
-  +---------+           +--------+
-  | Weighted|           | QLM    |
-  | Jaccard |           | Score  |
-  +---------+           +--------+
+  +--------+           +--------+
+  | LSH    |           | Lexical|
+  | Seeds  |           | Index  |
+  +--------+           +--------+
+      |                     |
+      v                     v
+  +----------------+   +--------+
+  | readFingerprint|   | QLM    |
+  | + Weighted     |   | Score  |
+  |   Jaccard      |   +--------+
+  +----------------+        |
       |                     |
       +----------+----------+
                  |
@@ -108,7 +127,7 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
 ```
 
 1. **Query Encoding:** The query is encoded with a `queryProbeMultiplier` of 2.0 to compensate for the sparsity of short queries.
-2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. Candidates are scored using brute-force Weighted Jaccard.
+2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. For each candidate, the stored fingerprint is read from `fingerprints.bin` and scored using brute-force Weighted Jaccard.
 3. **Lexical Lane:** Query tokens are routed through the inverted index and scored via QLM.
 4. **Fusion & Resolution:** Both lanes are merged using Reciprocal Rank Fusion (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
 5. **Rerank:** Top candidates receive a final term-coverage boost (`+ 0.5 * coverage`) to push exact matches to the top of the result list.
@@ -136,7 +155,7 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
   Same parent ID, fresh chunks
 ```
 
-Performs a logical atomic delete-then-insert. It calls the Delete workflow to wipe the old chunks from LSH and lexical indexes, then appends a new WAL record and re-inserts the updated content, seamlessly mapping the fresh chunks back to the original parent ID.
+Performs a delete-then-insert. It calls the Delete workflow to wipe the old chunks from LSH and lexical indexes, then appends a new WAL record and re-inserts the updated content, seamlessly mapping the fresh chunks back to the original parent ID.
 
 ### 4. Delete (Text)
 
@@ -146,7 +165,7 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
       v
   +------------------+
   | Collect chunkIds |
-  | from chunks.bin  |
+  | from chunkToParent|
   +------------------+
       |
       v
@@ -156,16 +175,25 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
       |
       v
   +------------------+
-  | freeId()         |----> Zero fingerprint
+  | freeId()         |----> Mark idx entry free
   +------------------+      Push to freelist
+      |
+      v
+  +------------------+
+  | Delete caches    |
+  | (text, tokens,   |
+  |  timestamp)      |
+  +------------------+
       |
       v
    syncHeader()
 ```
 
-1. **Collect:** Identify all chunk IDs associated with the target parent ID.
-2. **Purge Indexes:** Remove the chunk from the LSH buckets and decrement its term frequencies from the lexical postings.
+1. **Collect:** Identify all chunk IDs associated with the target parent ID from the in-memory `chunkToParent` table.
+2. **Purge Indexes:** For each chunk, remove it from the LSH buckets and decrement its term frequencies from the lexical postings.
 3. **Free ID:** Mark the slot as free in `fingerprints.idx` and push it to the freelist.
+4. **Delete Caches:** Remove the parent entry from `textCache`, `tokenCache`, and `timestampCache`.
+5. **Sync Header:** Persist the updated record count and freelist state to `fingerprints.idx`.
 
 ### 5. Vision / Dense-Vector Insert
 
@@ -174,9 +202,14 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
       |
       v
   +------------------+
-  | Dense Encoder    |
-  | (k-WTA, 128      |----> Top-k dims by |value|
-  |  winners)        |      probed via hashFeature
+  | allocId()        |
+  +------------------+
+      |
+      v
+  +------------------+
+  | Dense Encoder    |----> Top-k dims by |value|
+  | (k-WTA, 128      |      probed via probeBlock
+  |  winners)        |
   +------------------+
       |
       v
@@ -186,18 +219,18 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
   +------------------+
       |
       +----------+----------+
-      |          |          |
-      v          v          v
-  +--------+  +-------------+  (no lexical
-  | LSH    |  | Fingerprint |   index for
-  | Insert |  | Store       |   dense vectors)
-  +--------+  +-------------+
+      |                     |
+      v                     v
+  +--------+           +-------------+  (no lexical
+  | LSH    |           | Fingerprint |   index for
+  | Insert |           | Store       |   dense vectors)
+  +--------+           +-------------+
       |
       v
   lsh.bin
 ```
 
-Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` use-case encodes a float32 vector directly to a fingerprint and inserts into LSH.
+Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` use-case allocates an ID, encodes a float32 vector directly to a fingerprint, writes it to the fingerprint store, and inserts into LSH.
 
 ### 6. Vision / Dense-Vector Search
 
@@ -223,15 +256,19 @@ Bypasses text chunking, SDR encoding, and lexical indexing. The `insertDense` us
   +--------+
       |
       v
-  +------------------------+
-  | Weighted Jaccard Score |
-  +------------------------+
+  +----------------+
+  | readFingerprint|
+  | + Weighted     |
+  |   Jaccard      |
+  +----------------+
       |
       v
-   Results[]
+  +------------------------+
+  | Top-k Results          |
+  +------------------------+
 ```
 
-The `searchDense` use-case encodes the query vector to a fingerprint and searches LSH. No lexical lane, no RRF, no reranker — pure semantic similarity.
+The `searchDense` use-case encodes the query vector to a fingerprint, queries LSH for candidates, reads each candidate's stored fingerprint, and scores via brute-force Weighted Jaccard. No lexical lane, no RRF, no reranker — pure semantic similarity.
 
 ### 7. Checkpoint & Restart
 
@@ -247,10 +284,12 @@ The `searchDense` use-case encodes the query vector to a fingerprint and searche
   +--------+ +--------+ +--------+ +--------+
       |          |          |          |
       v          v          v          v
-  lsh.bin   lexical.bin  corpus.bin  (header)
+  lsh.bin   lexical.bin  corpus.bin  (embedded
+                                         in
+                                       each)
 ```
 
-`checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to disk, embedding the current WAL offset. On restart, Adaline loads the persisted indexes and replays only the un-checkpointed WAL tail.
+`checkpoint()` serializes the in-memory LSH buckets, lexical postings, and corpus IDF tables to disk, embedding the current WAL offset in the header of each persisted file. On restart, Adaline loads the persisted indexes and replays only the un-checkpointed WAL tail.
 
 ---
 
