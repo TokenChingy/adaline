@@ -8,8 +8,8 @@ A Nim-based vector search engine that converts text into **10,240-bit sparse fin
 
 Adaline bypasses traditional database overhead by operating entirely on memory-mapped files. 
 
-* **Zero-Copy Storage:** All data lives in slot-addressed, memory-mapped flat files (`.bin`) with 256-byte self-describing headers. Files grow in pre-allocated 64 MiB chunks to minimize `mmap` remaps.
-* **Efficient Memory Management:** IDs are dense integers starting at 0. Deleted slots are pushed to a freelist stored directly in the first 8 bytes of freed fingerprint slots.
+* **Zero-Copy Storage:** Data lives in memory-mapped flat files with 256-byte self-describing headers. `fingerprints.bin` holds append-only variable-length compressed records; `fingerprints.idx` maps dense slot IDs to byte offsets. Files grow in pre-allocated 64 MiB chunks to minimize `mmap` remaps.
+* **Efficient Memory Management:** IDs are dense integers starting at 0. Deleted slots are pushed to a freelist stored in the `fingerprints.idx` offset field.
 * **The Dual-Lane Highway:** Every document is indexed into both a Semantic Lane (for fuzzy, conceptual matching) and a Lexical Lane (for precise, token-based matching).
 
 ---
@@ -109,7 +109,7 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
 
 1. **Query Encoding:** The query is encoded with a `queryProbeMultiplier` of 2.0 to compensate for the sparsity of short queries.
 2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. Candidates are scored using brute-force Weighted Jaccard.
-3. **Lexical Lane:** Query tokens are concurrently routed through the inverted index and scored via QLM.
+3. **Lexical Lane:** Query tokens are routed through the inverted index and scored via QLM.
 4. **Fusion & Resolution:** Both lanes are merged using Reciprocal Rank Fusion (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
 5. **Rerank:** Top candidates receive a final term-coverage boost (`+ 0.5 * coverage`) to push exact matches to the top of the result list.
 
@@ -165,7 +165,7 @@ Performs a logical atomic delete-then-insert. It calls the Delete workflow to wi
 
 1. **Collect:** Identify all chunk IDs associated with the target parent ID.
 2. **Purge Indexes:** Remove the chunk from the LSH buckets and decrement its term frequencies from the lexical postings.
-3. **Free ID:** Zero out the fingerprint and push the slot back to the `mmap` freelist.
+3. **Free ID:** Mark the slot as free in `fingerprints.idx` and push it to the freelist.
 
 ### 5. Vision / Dense-Vector Insert
 
@@ -355,8 +355,11 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 | `rerankCoverageWeight` | 0.5 | Term-coverage boost weight |
 | `chunkSaturationThreshold` | 0.6 | Chunk trigger limit for block saturation |
 | `tokenProbes` | 3 | Base probes per token (reduced for sparsity) |
+| `tokenBigramProbes` | 2 | Base probes per adjacent token bigram |
 | `bigramProbes` | 1 | Base probes per char-bigram |
 | `contextProbes` | 1 | Base probes per XOR-context feature |
+| `semanticSearchEnabled` | true | Enable LSH semantic lane |
+| `lexicalSearchEnabled` | true | Enable lexical QLM lane |
 | `maxTokenFeatures` | 12 | Top-K IDF tokens kept per document (0 = disable) |
 | `queryProbeMultiplier` | 2.0 | Extra probe multiplier for short queries |
 
@@ -375,7 +378,7 @@ Adaline can index float32 vectors (e.g. CNN embeddings, tabular features) throug
 3. Hash each winning dimension via `hashFeature` to generate probes.
 4. Flip the corresponding bits in a 10,240-bit fingerprint using the same `probeBlock` primitive as the text SDR encoder.
 
-The resulting fingerprint is structurally identical to a text fingerprint and is stored in the same `fingerprints.bin` slot format.
+The resulting fingerprint is structurally identical to a text fingerprint and is stored in the same `fingerprints.bin` format.
 
 ### API
 

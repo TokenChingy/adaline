@@ -6,7 +6,7 @@ Adaline is a Nim library for generating and querying **Sparse Distributed Repres
 
 Long memories are automatically **chunked** into multiple fingerprints when any block approaches saturation. Chunk-to-parent linkage is persisted in `chunks.bin`.
 
-The entire index is laid out as contiguous byte arrays on disk with 256-byte self-describing headers (`ADLN` magic). Store files use dense slot addressing (0, 1, 2…) rather than byte offsets, with pre-allocated 64 MiB growth chunks to minimize mmap remaps. A freelist enables slot reuse on delete. Persisted indexes (`lsh.bin`, `lexical.bin`, `corpus.bin`) allow fast startup by skipping full WAL replay. The CLI casts pointers via `mmap` and immediately begins execution.
+The entire index is laid out as contiguous byte arrays on disk with 256-byte self-describing headers (`ADLN` magic). `fingerprints.bin` stores append-only variable-length compressed fingerprints addressed by byte offset; `fingerprints.idx` provides a dense slot-addressed table (0, 1, 2…) mapping each ID to its `(offset, size)` pair. A freelist enables slot reuse on delete. Files grow in pre-allocated 64 MiB chunks to minimize mmap remaps. Persisted indexes (`lsh.bin`, `lexical.bin`, `corpus.bin`) allow fast startup by skipping full WAL replay. The CLI casts pointers via `mmap` and immediately begins execution.
 
 ## Folder layout
 
@@ -30,7 +30,7 @@ domain/services/    <- Pure domain orchestration. Each operation lives in
                        `memory/` (types, init, insert, delete, update, search,
                        checkpoint, insert_dense, search_dense, delete_dense).
                        Import the specific file; no umbrella re-export.
- infrastructure/     <- Concrete adapters: mmapped storage (WAL, fingerprint store,
+ infrastructure/    <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        chunks mapping store). Imported by domain services when needed.
 bindings/           <- Python bindings (nimpy) exposing the same use cases.
 benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark,
