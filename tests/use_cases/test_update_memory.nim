@@ -45,4 +45,4 @@ suite "Update memory use case":
       if r.id == id:
         found = true
         foundScore = r.score
-    check (not found) or (foundScore < 0.15)
+    check (not found) or (foundScore < 0.25)

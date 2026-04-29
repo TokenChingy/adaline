@@ -38,7 +38,10 @@ proc deleteMemory*(service: var MemoryService; parentId: uint64) =
 
     service.chunkToParent.del(chunkId)
 
+  service.parentToChunks.del(parentId)
+
   service.textCache.del(parentId)
+  service.lowerTextCache.del(parentId)
   service.tokenCache.del(parentId)
   service.timestampCache.del(parentId)
 

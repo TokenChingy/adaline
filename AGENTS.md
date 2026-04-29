@@ -2,7 +2,7 @@
 
 ## What this project is
 
-Adaline is a Nim library for generating and querying **Sparse Distributed Representations** via **Sparse Fingerprints**. Each fingerprint is a fixed-size **10240-bit bitmap**. These fingerprints are stored and searched via a **Fingerprint LSH** (GoldFinger-style) seed layer with brute-force Jaccard scoring. A **Lexical Sidecar** (Query Likelihood with Dirichlet Smoothing) runs in parallel, and results are merged via **Reciprocal Rank Fusion**.
+Adaline is a Nim library for generating and querying **Sparse Distributed Representations** via **Sparse Fingerprints**. Each fingerprint is a fixed-size **10240-bit bitmap**. These fingerprints are stored and searched via a **Fingerprint LSH** (GoldFinger-style) seed layer with brute-force Jaccard scoring. A **Lexical Sidecar** (Query Likelihood with Dirichlet Smoothing) runs in parallel, and results are merged via **Reciprocal Rank Fusion with Score Awareness (RRF-S)**.
 
 Long memories are automatically **chunked** into multiple fingerprints when any block approaches saturation. Chunk-to-parent linkage is persisted in `chunks.bin`.
 
@@ -24,7 +24,7 @@ domain/algorithms/  <- The math:
                        - Lexical index (QLM + Dirichlet smoothing)
                        - Corpus index (IDF tracking)
                        - RRF merger
-                       - Reranker (term-coverage boost)
+                       - Reranker (phrase-aware: IDF-weighted coverage, exact phrase matching, length normalization)
                        - Chunker (conditional sentence-aware splitting)
 domain/services/    <- Pure domain orchestration. Each operation lives in
                        `memory/` (types, init, insert, delete, update, search,
@@ -59,7 +59,7 @@ Use Cases ← Domain ← Infrastructure
 - **Storage:** Memory-mapped flat files with self-describing headers (WAL, fingerprint store, chunks mapping store, persisted LSH/lexical/corpus indexes)
 - **Index / search structure:** Banded Fingerprint LSH + brute-force Jaccard
 - **Lexical lane:** Query Likelihood Model with Dirichlet Smoothing
-- **Merger:** Reciprocal Rank Fusion (RRF)
+- **Merger:** Reciprocal Rank Fusion (RRF-S)
 - **Chunking:** Sentence-aware conditional splitting with overlap; threshold configurable via `chunkSaturationThreshold`
 - **Delete / Update:** `deleteMemory()` and `updateMemory()` remove entries from LSH and lexical indexes, then free the slot for reuse.
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
@@ -69,15 +69,17 @@ Use Cases ← Domain ← Infrastructure
 - **Top-K token filtering:** Documents encode only the top-K tokens by IDF (default 12). This cuts fingerprint size to ~220 bytes (~83% savings) while improving nDCG@10 and MRR by ~4 points on SciFact.
 - **LSH query optimizations:** Epoch-array dedup (replaces `HashSet` per query), AND-construction (min 2 band hits), fast-path `bandHash` (unrolled, no `mod` for default config), in-place `removeLsh`, and pre-sized table on `loadLsh`. These optimizations more than doubled SciFact query throughput (125 → 277 q/s) with no recall loss.
 - **Lexical lane `seq[float]` scoring:** Replaced `Table[uint64, float]` docScores with a dense `seq[float>` + touched-list, eliminating hash-table overhead in the posting-loop hot path.
-- **Pre-tokenized rerank cache:** Added `tokenCache: Table[uint64, HashSet[string]]` to `MemoryService`, populated on insert/update. Reranker now does HashSet lookups instead of per-query tokenization.
+- **Pre-tokenized rerank cache:** Added `tokenCache: Table[uint64, HashSet[string]]` and `lowerTextCache: Table[uint64, string]` to `MemoryService`, populated on insert/update. Reranker does HashSet lookups and substring searches on pre-lowercased text instead of per-query tokenization.
+- **Score-aware RRF (RRF-S):** `mergeRrf` multiplies each reciprocal-rank contribution by the normalised raw lane score, preserving RRF's robustness while using score magnitude as a tie-breaker.
+- **Phrase-aware lexical reranker:** Replaces the uniform term-coverage boost with a three-factor blend: IDF-weighted unigram coverage, exact substring phrase bonus, and soft document-length normalization. This improves nDCG@10 by ~0.05 on SciFact and ~0.08 on ArguAna.
 
 ## Historical Notes
 
 Older branches (`fix/no-graph-weyl-sparse`, `master`) included an HNSW graph layer on top of LSH. This was removed after systematic benchmarking showed that with sparse fingerprints (top-K filtering, k-WTA dense vectors), HNSW graph edges were too weak to provide navigability benefits. LSH + brute-force Jaccard is faster to insert, equally fast (or faster) to query, and yields identical recall across all tested corpus sizes (3K–57K docs).
 
-**Lane ablation (SciFact):** Disabling the lexical lane drops recall@100 from 87.7% to 40.6% and nDCG@10 from 0.604 to 0.348. The lexical lane is critical on text datasets with heavy lexical overlap.
+**Lane ablation (SciFact):** Disabling the lexical lane drops recall@100 from 87.72% to 40.55% and nDCG@10 from 0.6535 to 0.2962. The lexical lane is critical on text datasets with heavy lexical overlap.
 
-**Lane contribution (SciFact top-k):** Semantic-only 47.3%, Lexical-only 47.1%, Both lanes 5.6%.
+**Lane contribution (SciFact top-k):** Semantic-only 48.4%, Lexical-only 46.0%, Both lanes 5.6%.
 
 ## Comment Style
 

@@ -24,9 +24,11 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   result.lexical = LexicalIndex(mu: cfg.dirichletMu)
   result.corpus = CorpusIndex()
   result.textCache = initTable[uint64, string]()
+  result.lowerTextCache = initTable[uint64, string]()
   result.tokenCache = initTable[uint64, HashSet[string]]()
   result.timestampCache = initTable[uint64, uint64]()
   result.chunkToParent = initTable[uint64, uint64]()
+  result.parentToChunks = initTable[uint64, seq[uint64]]()
 
   let lshPath = dataDir / "lsh.bin"
   let lexicalPath = dataDir / "lexical.bin"
@@ -50,12 +52,11 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
                           0'u64
 
   let chunkEntries = replayChunks(result.storage)
-  var parentToChunks = initTable[uint64, seq[uint64]]()
   var maxId: uint64 = 0
   var hasData = false
   for (parentId, chunkId) in chunkEntries:
     result.chunkToParent[chunkId] = parentId
-    parentToChunks.mgetOrPut(parentId, @[]).add(chunkId)
+    result.parentToChunks.mgetOrPut(parentId, @[]).add(chunkId)
     if chunkId > maxId:
       maxId = chunkId
     hasData = true
@@ -64,6 +65,7 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
   var walPos: uint64 = 0
   for (parentId, timestamp, text) in entries:
     result.textCache[parentId] = text
+    result.lowerTextCache[parentId] = text.toLowerAscii()
     result.tokenCache[parentId] = initHashSet[string]()
     for token in text.toLowerAscii().split(AllChars - Letters - Digits):
       if token.len > 0:
@@ -77,7 +79,7 @@ proc initMemoryService*(dataDir: string; cfg: EngineConfig = defaultEngineConfig
     let entryStart = walPos
     walPos += entrySize
 
-    let storedChunkIds = parentToChunks.getOrDefault(parentId, @[])
+    let storedChunkIds = result.parentToChunks.getOrDefault(parentId, @[])
     let chunkTexts = splitIntoChunks(text, cfg)
     let effectiveChunkIds = if storedChunkIds.len > 0:
                               storedChunkIds

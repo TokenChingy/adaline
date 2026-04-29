@@ -1,6 +1,6 @@
 # Adaline
 
-A Nim-based vector search engine that converts text into **10,240-bit sparse fingerprints**. It utilizes a dual-lane retrieval architecture, running semantic search (LSH) and lexical matching (Inverted Index + QLM) in parallel. Results are fused via Reciprocal Rank Fusion (RRF) and reranked by term coverage.
+A Nim-based vector search engine that converts text into **10,240-bit sparse fingerprints**. It utilizes a dual-lane retrieval architecture, running semantic search (LSH) and lexical matching (Inverted Index + QLM) in parallel. Results are fused via score-aware Reciprocal Rank Fusion (RRF-S) and reranked by a phrase-aware lexical model.
 
 ---
 
@@ -105,8 +105,8 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
                  |
                  v
           +------------+
-          | RRF Merger |
-          | (k=10)     |
+          | RRF-S Merger |
+          | (k=10)       |
           +------------+
                  |
                  v
@@ -118,7 +118,7 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
                  |
                  v
           +------------+
-          | Term-Cov   |
+          | Phrase-Aw. |
           | Rerank     |
           +------------+
                  |
@@ -129,8 +129,8 @@ Adaline bypasses traditional database overhead by operating entirely on memory-m
 1. **Query Encoding:** The query is encoded with a `queryProbeMultiplier` of 2.0 to compensate for the sparsity of short queries.
 2. **Semantic Lane:** The 80 LSH bands are hashed to collect candidate seeds. For each candidate, the stored fingerprint is read from `fingerprints.bin` and scored using brute-force Weighted Jaccard.
 3. **Lexical Lane:** Query tokens are routed through the inverted index and scored via QLM.
-4. **Fusion & Resolution:** Both lanes are merged using Reciprocal Rank Fusion (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
-5. **Rerank:** Top candidates receive a final term-coverage boost (`+ 0.5 * coverage`) to push exact matches to the top of the result list.
+4. **Fusion & Resolution:** Both lanes are merged using score-aware RRF-S (`rrfK = 10`). Chunk IDs are resolved back to their parent IDs, keeping only the highest-scoring chunk per parent.
+5. **Rerank:** Top-30 candidates receive a final phrase-aware boost blending IDF-weighted coverage, exact substring phrase matching, and soft length normalization to push precise lexical matches to the top.
 
 ### 3. Update (Text)
 
@@ -363,19 +363,19 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 
 | Dataset | Corpus | Indexing | Query (top-100) | nDCG@10 | R@5 |
 |---------|--------|----------|-----------------|---------|-----|
-| SciFact | 5,183 docs | 4,421 docs/s | 277 q/s | 0.604 | 67.1% |
-| NFCorpus | 3,633 docs | 4,251 docs/s | 395 q/s | 0.279 | 10.9% |
-| ArguAna | 8,674 docs | 5,027 docs/s | 193 q/s | 0.252 | 38.1% |
+| SciFact | 5,183 docs | 4,669 docs/s | 273 q/s | 0.654 | 72.1% |
+| NFCorpus | 3,633 docs | 4,646 docs/s | 460 q/s | 0.286 | 11.5% |
+| ArguAna | 8,674 docs | 5,216 docs/s | 95 q/s | 0.337 | 50.0% |
 | FIQA | 57K docs | 5,677 docs/s | 14.6 q/s | 0.168 | — |
-| LongMemEval-S | 500 questions | — | — | — | 93.6% |
+| LongMemEval-S | 500 questions | — | — | — | 94.8% |
 | Vision (CIFAR-10 / MobileNetV2) | 200 vectors | — | 0.22 ms/q | — | — |
 
 **Performance Notes:**
-* **SciFact:** Recall@1 = 45.3%, R@100 = 87.7%, MRR = 0.57. P50 latency ~3.6 ms for top-100.
-* **NFCorpus:** Recall@1 = 5.3%, Precision@1 = 37.8%, MRR = 0.47. P50 latency ~2.5 ms.
-* **ArguAna:** Recall@1 = 0%, R@100 = 97.3%, MRR = 0.17. P50 latency ~4.8 ms. (Adversarial counter-argument retrieval; lexical lane carries most signal).
-* **FIQA:** 57K financial QA pairs. Query latency ~68 ms for top-100.
-* **LongMemEval-S:** R@1 = 76.8%, R@5 = 93.6%. (Conversational memory retrieval).
+* **SciFact:** Recall@1 = 52.2%, R@100 = 87.7%, MRR = 0.62. P50 latency ~3.7 ms for top-100.
+* **NFCorpus:** Recall@1 = 5.2%, Precision@1 = 38.4%, MRR = 0.49. P50 latency ~2.0 ms.
+* **ArguAna:** Recall@1 = 0%, R@100 = 97.3%, MRR = 0.23. P50 latency ~9.3 ms. (Adversarial counter-argument retrieval; lexical lane carries most signal).
+* **FIQA:** 57K financial QA pairs. Query latency ~66 ms for top-100.
+* **LongMemEval-S:** R@1 = 83.6%, R@5 = 94.8%. (Conversational memory retrieval).
 * **Vision (CIFAR-10 / MobileNetV2):** 1-shot classification 44.4% dense vs 42.2% sparse. 20-shot converges to 62.6% dense vs 61.8% sparse. Open-set AUROC 0.578.
 
 ---
@@ -390,8 +390,10 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 | `contextWeight` | 0.25 | Jaccard weight for XOR-context block |
 | `lshBands` / `lshRows` | 80 / 2 | Fingerprint LSH banding (full 160-segment coverage) |
 | `dirichletMu` | 2000.0 | QLM smoothing parameter |
-| `rrfK` | 10 | Reciprocal Rank Fusion constant |
-| `rerankCoverageWeight` | 0.5 | Term-coverage boost weight |
+| `rrfK` | 10 | Score-aware RRF-S fusion constant |
+| `rerankIdfWeight` | 0.30 | IDF-weighted coverage boost weight |
+| `rerankPhraseWeight` | 0.20 | Exact phrase match boost weight |
+| `rerankLenWeight` | 0.05 | Length normalization boost weight |
 | `chunkSaturationThreshold` | 0.6 | Chunk trigger limit for block saturation |
 | `tokenProbes` | 3 | Base probes per token (reduced for sparsity) |
 | `tokenBigramProbes` | 2 | Base probes per adjacent token bigram |

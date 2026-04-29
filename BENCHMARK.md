@@ -20,6 +20,13 @@ nimble benchmark
 
 Datasets auto-download on first run and cache in `benchmarks/<name>/`.
 
+### Lane Ablation & Contribution (SciFact)
+
+```bash
+nim c -d:release -o:benchmarks/beir_ablation benchmarks/beir_ablation.nim
+./benchmarks/beir_ablation
+```
+
 ### CRUD (delete + update throughput)
 
 ```bash
@@ -65,34 +72,34 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 1.17 s |
-| Insert throughput | 4,421 docs/s |
-| Insert P50 | 0.22 ms |
-| Insert P95 | 0.32 ms |
+| Total insert time | 1.11 s |
+| Insert throughput | 4,669 docs/s |
+| Insert P50 | 0.20 ms |
+| Insert P95 | 0.30 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 277 q/s |
-| Query P50 | 3.6 ms |
-| Query P95 | 3.8 ms |
+| Query throughput | 273 q/s |
+| Query P50 | 3.7 ms |
+| Query P95 | 4.2 ms |
 
 ### Retrieval Quality (300 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 45.25% |
-| Recall@5 | 67.06% |
-| Recall@10 | 74.57% |
+| Recall@1 | 52.22% |
+| Recall@5 | 72.11% |
+| Recall@10 | 77.68% |
 | Recall@100 | 87.72% |
-| Precision@1 | 46.67% |
-| Precision@5 | 14.33% |
-| Precision@10 | 8.17% |
+| Precision@1 | 52.67% |
+| Precision@5 | 15.40% |
+| Precision@10 | 8.50% |
 | Precision@100 | 0.99% |
-| MRR | 0.5729 |
-| MAP | 0.5606 |
-| nDCG@10 | 0.6044 |
+| MRR | 0.6246 |
+| MAP | 0.6140 |
+| nDCG@10 | 0.6535 |
 
 ### CRUD Throughput
 
@@ -105,15 +112,17 @@ Apple MacBook Air M2 (16 GB), macOS, Apple SSD.
 
 ### Lane Ablation
 
-Disabling the lexical lane (`lexicalSearchEnabled = false`) on SciFact:
+| Metric | Dual Lane | Semantic Only | Lexical Only |
+|--------|-----------|---------------|--------------|
+| Recall@1 | 52.22% | 27.00% | 51.22% |
+| Recall@5 | 72.11% | 31.00% | 72.53% |
+| Recall@10 | 77.68% | 32.00% | 78.18% |
+| Recall@100 | 87.72% | 40.55% | 88.59% |
+| MRR | 0.6246 | 0.2926 | 0.6234 |
+| MAP | 0.6140 | 0.2899 | 0.6142 |
+| nDCG@10 | 0.6535 | 0.2962 | 0.6540 |
 
-| Metric | Dual Lane | Semantic Only | Δ |
-|--------|-----------|---------------|---|
-| Recall@1 | 45.25% | 31.33% | **−13.92 pts** |
-| Recall@100 | 87.72% | 40.55% | **−47.17 pts** |
-| nDCG@10 | 0.6044 | 0.3483 | **−0.2561** |
-
-The lexical lane is critical on SciFact: removing it cuts recall@100 in half and drops nDCG@10 by 42%.
+The lexical lane is critical on SciFact: removing it cuts recall@100 in half and drops nDCG@10 by 0.36. Interestingly, lexical-only now slightly outperforms dual-lane on nDCG@10 (0.6540 vs 0.6535), suggesting the phrase-aware reranker is almost entirely lexical-driven on this dataset.
 
 ### Lane Contribution
 
@@ -121,8 +130,8 @@ Of the top-k merged results (before reranking), the origin breakdown is:
 
 | Source | % of results |
 |--------|-------------|
-| Semantic only | 47.3% |
-| Lexical only | 47.1% |
+| Semantic only | 48.4% |
+| Lexical only | 46.0% |
 | Both lanes | 5.6% |
 
 Each lane contributes roughly half of the final results independently.
@@ -137,34 +146,34 @@ Each lane contributes roughly half of the final results independently.
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 0.85 s |
-| Insert throughput | 4,251 docs/s |
-| Insert P50 | 0.23 ms |
-| Insert P95 | 0.34 ms |
+| Total insert time | 0.78 s |
+| Insert throughput | 4,646 docs/s |
+| Insert P50 | 0.21 ms |
+| Insert P95 | 0.31 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 395 q/s |
-| Query P50 | 2.46 ms |
-| Query P95 | 2.81 ms |
+| Query throughput | 460 q/s |
+| Query P50 | 2.05 ms |
+| Query P95 | 2.62 ms |
 
 ### Retrieval Quality (323 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| Recall@1 | 5.32% |
-| Recall@5 | 10.94% |
-| Recall@10 | 13.41% |
-| Recall@100 | 22.11% |
-| Precision@1 | 37.77% |
-| Precision@5 | 25.76% |
-| Precision@10 | 19.85% |
-| Precision@100 | 5.12% |
-| MRR | 0.4695 |
-| MAP | 0.1258 |
-| nDCG@10 | 0.2788 |
+| Recall@1 | 5.16% |
+| Recall@5 | 11.52% |
+| Recall@10 | 14.13% |
+| Recall@100 | 22.22% |
+| Precision@1 | 38.39% |
+| Precision@5 | 26.56% |
+| Precision@10 | 20.19% |
+| Precision@100 | 5.16% |
+| MRR | 0.4860 |
+| MAP | 0.1232 |
+| nDCG@10 | 0.2857 |
 
 ---
 
@@ -176,39 +185,39 @@ Each lane contributes roughly half of the final results independently.
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 1.73 s |
-| Insert throughput | 5,027 docs/s |
-| Insert P50 | 0.19 ms |
-| Insert P95 | 0.31 ms |
+| Total insert time | 1.66 s |
+| Insert throughput | 5,216 docs/s |
+| Insert P50 | 0.18 ms |
+| Insert P95 | 0.29 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 193 q/s |
-| Query P50 | 4.83 ms |
-| Query P95 | 8.14 ms |
+| Query throughput | 95 q/s |
+| Query P50 | 9.3 ms |
+| Query P95 | 18.4 ms |
 
 ### Retrieval Quality (1,406 judged queries)
 
 | Metric | Value |
 |--------|-------|
 | Recall@1 | 0.00% |
-| Recall@5 | 38.12% |
-| Recall@10 | 55.76% |
+| Recall@5 | 50.00% |
+| Recall@10 | 72.05% |
 | Recall@100 | 97.30% |
 | Precision@1 | 0.00% |
-| Precision@5 | 7.62% |
-| Precision@10 | 5.58% |
+| Precision@5 | 10.00% |
+| Precision@10 | 7.20% |
 | Precision@100 | 0.98% |
-| MRR | 0.1739 |
-| MAP | 0.1739 |
-| nDCG@10 | 0.2520 |
+| MRR | 0.2300 |
+| MAP | 0.2300 |
+| nDCG@10 | 0.3368 |
 
 ### Notes
 
 - ArguAna is deliberately adversarial: the correct document is topically identical but stance-opposed. Jaccard-based semantic similarity cannot distinguish "for" from "against," so R@1 is zero.
-- The lexical lane carries most of the signal here (R@100 = 97.3%), but without stance-aware reranking the correct document rarely cracks the top 10.
+- The lexical lane carries most of the signal here (R@100 = 97.3%). The phrase-aware reranker pushes the correct mirrored-argument document into the top 5 for 50.00% of queries (up from 38.12%) and into the top 10 for 72.05% of queries (up from 55.76%).
 - Query latency is higher than SciFact/NFCorpus because the corpus is larger (~8.7K docs) and queries are longer, more lexically complex arguments.
 
 ---
@@ -340,26 +349,26 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 
 | Metric | Value |
 |--------|-------|
-| R@1 | 76.80% |
-| R@5 | 93.60% |
-| R@10 | 95.60% |
+| R@1 | 83.60% |
+| R@5 | 94.80% |
+| R@10 | 96.20% |
 
 ### Per-Category R@5
 
 | Category | R@5 | Count |
 |----------|-----|-------|
-| knowledge-update | 100.00% | 78/78 |
-| single-session-user | 97.14% | 68/70 |
+| knowledge-update | 98.72% | 77/78 |
+| single-session-assistant | 100.00% | 56/56 |
+| single-session-user | 95.71% | 67/70 |
 | multi-session | 95.49% | 127/133 |
-| temporal-reasoning | 92.48% | 123/133 |
-| single-session-assistant | 96.43% | 54/56 |
-| single-session-preference | 60.00% | 18/30 |
+| temporal-reasoning | 93.98% | 125/133 |
+| single-session-preference | 73.33% | 22/30 |
 
 ### Notes
 
-- Correct session is in the top 5 for 468/500 questions.
-- Knowledge updates are perfect (100% R@5).
-- Single-session preference is the weak spot (60.0%). Preferences are often implicit and require inference beyond literal text matching.
+- Correct session is in the top 5 for 474/500 questions.
+- Knowledge updates are near-perfect (98.7% R@5).
+- Single-session preference is the weak spot (73.3%). Preferences are often implicit and require inference beyond literal text matching.
 - Conditional chunking is essential here. Sessions average ~115K tokens, which would saturate a single fingerprint.
 
 ---
@@ -384,26 +393,27 @@ On text datasets where queries and documents share heavy lexical overlap (SciFac
 
 **SciFact ablation:**
 
-| | Dual Lane | Semantic Only | Δ |
+| | Dual Lane | Semantic Only | Lexical Only |
 |---|---|---|---|
-| R@100 | 87.72% | 40.55% | **−47.2 pts** |
-| nDCG@10 | 0.604 | 0.348 | **−0.256** |
+| R@1 | 52.22% | 27.00% | 51.22% |
+| R@100 | 87.72% | 40.55% | 88.59% |
+| nDCG@10 | 0.6535 | 0.2962 | 0.6540 |
 
 **Lane contribution** (top-k merged results, SciFact):
 
 | Source | % |
 |--------|---|
-| Semantic only | 47.3% |
-| Lexical only | 47.1% |
+| Semantic only | 48.4% |
+| Lexical only | 46.0% |
 | Both lanes | 5.6% |
 
 ### LSH Configuration
 
 Current defaults use 80 LSH bands with 2 rows each, providing full coverage of all 160 fingerprint segments. This strikes a balance between candidate recall and index size:
 
-- **SciFact:** 4,421 docs/s insert, 277 q/s query, 87.72% R@100, nDCG@10 = 0.604
-- **NFCorpus:** 4,251 docs/s insert, 395 q/s query
-- **ArguAna:** 5,027 docs/s insert, 193 q/s query
+- **SciFact:** 4,669 docs/s insert, 273 q/s query, 87.72% R@100, nDCG@10 = 0.6535
+- **NFCorpus:** 4,646 docs/s insert, 460 q/s query
+- **ArguAna:** 5,216 docs/s insert, 95 q/s query
 - **FIQA:** 5,677 docs/s insert, 14.6 q/s query
 
 More bands increase candidate recall but grow the index; fewer bands reduce memory at the cost of recall. For corpora under ~10K docs, 80 bands is the practical sweet spot. At 57K docs (FIQA), brute-force Jaccard over LSH candidates becomes the bottleneck, dropping query throughput to ~15 q/s.
@@ -418,7 +428,20 @@ The LSH + brute-force Jaccard semantic lane was optimized with:
 - **In-place `removeLsh`** (no allocation churn on delete)
 - **Pre-sized table** on `loadLsh`
 
-These optimizations more than doubled query throughput on SciFact (125 → 277 q/s) with no meaningful recall loss.
+These optimizations more than doubled query throughput on SciFact (125 → 273 q/s) with no meaningful recall loss.
+
+### Reranker Impact
+
+Replacing the uniform term-coverage boost with the phrase-aware lexical reranker yielded the following quality deltas:
+
+| Dataset | Baseline nDCG@10 | New nDCG@10 | Δ |
+|---------|-----------------|-------------|---|
+| SciFact | 0.6044 | 0.6535 | **+8.1%** |
+| ArguAna | 0.2520 | 0.3368 | **+33.7%** |
+| NFCorpus | 0.2788 | 0.2857 | **+2.5%** |
+| LongMemEval R@5 | 93.60% | 94.80% | **+1.2 pts** |
+
+The gains are largest on ArguAna because exact phrase matching is the best lexical proxy for detecting mirrored counter-arguments. On SciFact, the gains come from matching multi-word scientific compounds (e.g., "treatment-resistant depression"). The reranker adds ~0.1 ms on SciFact but ~4.5 ms on ArguAna because ArguAna queries are longer and more lexically complex; limiting the reranker to the top-30 candidates keeps SciFact latency within ~3% of baseline.
 
 ### Chunking
 
@@ -435,6 +458,6 @@ The `encodeDense` k-WTA encoder converts arbitrary L2-normalised float32 vectors
 - **Distance:** `1.0 - weightedJaccard` with block weights 50% (tokens), 25% (bigrams), 25% (context).
 - **Search:** LSH seeds → brute-force weighted Jaccard scoring.
 - **Lexical:** Query Likelihood Model with Dirichlet smoothing (μ=2000).
-- **Fusion:** RRF (k=10).
-- **Reranking:** Term-coverage boost (weight=0.5) on top-K merged results.
+- **Fusion:** RRF-S (score-aware RRF, k=10). Multiplies each reciprocal-rank contribution by the normalised raw lane score, preserving RRF robustness while using score magnitude as a tie-breaker.
+- **Reranking:** Phrase-aware lexical reranker on the top-30 candidates. Blends IDF-weighted unigram coverage, exact substring phrase matching, and soft document-length normalization (weights 0.30 / 0.20 / 0.05).
 - **Metrics:** Computed against BEIR qrels (binary relevance), averaged only over queries with judgments. nDCG uses standard `1/log2(rank+1)` gain.

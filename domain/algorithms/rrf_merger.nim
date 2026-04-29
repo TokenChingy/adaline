@@ -1,6 +1,8 @@
-## Reciprocal Rank Fusion (RRF) merger.
+## Reciprocal Rank Fusion (RRF) merger with score awareness (RRF-S).
 ## Combines semantic and lexical lane result lists by summing
-## reciprocal ranks, then deduplicates by parent memory ID.
+## reciprocal ranks weighted by normalised raw scores. This preserves
+## RRF's robustness while using the magnitude of each lane's similarity
+## scores as a tie-breaker.
 
 
 import std/[tables, algorithm]
@@ -10,12 +12,22 @@ proc mergeRrf*(semantic: seq[tuple[memoryId: uint64, score: float]];
                k: int; rrfK: int): seq[tuple[memoryId: uint64, score: float]] =
   var scores = initTable[uint64, float]()
 
+  let semMax = if semantic.len > 0: semantic[0].score else: 1.0
+  let semMin = if semantic.len > 0: semantic[^1].score else: 0.0
+  let lexMax = if lexical.len > 0: lexical[0].score else: 1.0
+  let lexMin = if lexical.len > 0: lexical[^1].score else: 0.0
+
+  let semSpread = semMax - semMin
+  let lexSpread = lexMax - lexMin
+
   for rank, item in semantic:
-    let rrfScore = 1.0 / (float(rrfK) + float(rank + 1))
+    let norm = if semSpread > 1e-9: (item.score - semMin) / semSpread else: 1.0
+    let rrfScore = 1.0 / (float(rrfK) + float(rank + 1)) * (1.0 + norm)
     scores[item.memoryId] = scores.getOrDefault(item.memoryId, 0.0) + rrfScore
 
   for rank, item in lexical:
-    let rrfScore = 1.0 / (float(rrfK) + float(rank + 1))
+    let norm = if lexSpread > 1e-9: (item.score - lexMin) / lexSpread else: 1.0
+    let rrfScore = 1.0 / (float(rrfK) + float(rank + 1)) * (1.0 + norm)
     scores[item.memoryId] = scores.getOrDefault(item.memoryId, 0.0) + rrfScore
 
   var ranked = newSeq[tuple[score: float, memoryId: uint64]]()

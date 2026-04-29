@@ -18,6 +18,8 @@ type
     lexical*: LexicalIndex
     corpus*: CorpusIndex
     textCache*: Table[uint64, string]
+    lowerTextCache*: Table[uint64, string]
     tokenCache*: Table[uint64, HashSet[string]]
     timestampCache*: Table[uint64, uint64]
     chunkToParent*: Table[uint64, uint64]
+    parentToChunks*: Table[uint64, seq[uint64]]

@@ -21,6 +21,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
   discard storage.appendWal(parentId, timestamp, content)
   service.textCache[parentId] = content
+  service.lowerTextCache[parentId] = content.toLowerAscii()
   service.tokenCache[parentId] = initHashSet[string]()
   for token in content.toLowerAscii().split(AllChars - Letters - Digits):
     if token.len > 0:
@@ -34,6 +35,7 @@ proc insert*(service: var MemoryService; content: string): uint64 =
   if chunks.len == 1:
     let chunkId = parentId
     service.chunkToParent[chunkId] = parentId
+    service.parentToChunks[parentId] = @[chunkId]
     discard storage.appendChunkMapping(parentId, chunkId)
 
     var fp = encodeSdr(content, service.cfg, service.corpus)
@@ -43,9 +45,11 @@ proc insert*(service: var MemoryService; content: string): uint64 =
 
     addMemory(service.lexical, chunkId, content)
   else:
+    var chunkIds = newSeq[uint64]()
     for chunkText in chunks:
       let chunkId = storage.allocId()
       service.chunkToParent[chunkId] = parentId
+      chunkIds.add(chunkId)
       discard storage.appendChunkMapping(parentId, chunkId)
 
       var fp = encodeSdr(chunkText, service.cfg, service.corpus)
@@ -54,5 +58,6 @@ proc insert*(service: var MemoryService; content: string): uint64 =
       insertLsh(service.lsh, addr fp, chunkId)
 
       addMemory(service.lexical, chunkId, chunkText)
+    service.parentToChunks[parentId] = chunkIds
 
   result = parentId

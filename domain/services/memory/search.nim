@@ -1,7 +1,7 @@
 ## Search memory service.
 ## Runs parallel semantic (LSH brute-force) and lexical (inverted index)
-## lanes, merges results via RRF, resolves chunks to parents,
-## and applies term-coverage reranking.
+## lanes, merges results via score-aware RRF, resolves chunks to parents,
+## and applies phrase-aware lexical reranking on the top candidates.
 
 
 import ./types
@@ -72,5 +72,11 @@ proc search*(service: var MemoryService; query: string; k: int): seq[Memory] =
   if candidates.len > k:
     candidates.setLen(k)
 
-  rerank(query, candidates, service.tokenCache, service.cfg)
+  if candidates.len > 30:
+    var topCandidates = candidates[0 ..< 30]
+    rerank(query, topCandidates, service.tokenCache, service.lowerTextCache, service.lexical, service.corpus, service.cfg)
+    for i in 0 ..< 30:
+      candidates[i] = topCandidates[i]
+  else:
+    rerank(query, candidates, service.tokenCache, service.lowerTextCache, service.lexical, service.corpus, service.cfg)
   result = candidates

@@ -1,30 +1,32 @@
-## Unit tests for Reranker algorithm.
+## Unit tests for Phrase-Aware Reranker algorithm.
 
 
 import unittest
 import ../../domain/entities/memory
 import ../../domain/entities/config
+import ../../domain/algorithms/lexical_index
+import ../../domain/algorithms/corpus_index
 import ../../domain/algorithms/reranker
 import std/[tables, sets]
 
 suite "Reranker":
   test "coverageBoost is 1.0 for exact match":
     var docTokens = initHashSet[string]()
-    for t in tokenize("quick fox"):
+    for t in reranker.tokenize("quick fox"):
       docTokens.incl(t)
-    check coverageBoost(tokenize("quick fox"), docTokens) == 1.0
+    check coverageBoost(reranker.tokenize("quick fox"), docTokens) == 1.0
 
   test "coverageBoost is 0.0 for no overlap":
     var docTokens = initHashSet[string]()
-    for t in tokenize("lazy dog"):
+    for t in reranker.tokenize("lazy dog"):
       docTokens.incl(t)
-    check coverageBoost(tokenize("quick fox"), docTokens) == 0.0
+    check coverageBoost(reranker.tokenize("quick fox"), docTokens) == 0.0
 
   test "coverageBoost is partial for some overlap":
     var docTokens = initHashSet[string]()
-    for t in tokenize("quick fox"):
+    for t in reranker.tokenize("quick fox"):
       docTokens.incl(t)
-    let boost = coverageBoost(tokenize("quick brown fox"), docTokens)
+    let boost = coverageBoost(reranker.tokenize("quick brown fox"), docTokens)
     check boost > 0.0
     check boost < 1.0
 
@@ -35,13 +37,18 @@ suite "Reranker":
     ]
     var cache = initTable[uint64, HashSet[string]]()
     cache[0'u64] = initHashSet[string]()
-    for t in tokenize("quick brown fox"):
+    for t in reranker.tokenize("quick brown fox"):
       cache[0'u64].incl(t)
     cache[1'u64] = initHashSet[string]()
-    for t in tokenize("lazy dog sleeping"):
+    for t in reranker.tokenize("lazy dog sleeping"):
       cache[1'u64].incl(t)
+    var lowerTextCache = initTable[uint64, string]()
+    lowerTextCache[0'u64] = "quick brown fox"
+    lowerTextCache[1'u64] = "lazy dog sleeping"
+    var lexical = LexicalIndex(mu: 2000.0)
+    var corpus = CorpusIndex()
     let cfg = defaultEngineConfig()
-    rerank("quick fox", candidates, cache, cfg)
+    rerank("quick fox", candidates, cache, lowerTextCache, lexical, corpus, cfg)
     check candidates[0].id == 0'u64
     check candidates[0].score > 0.5
 
@@ -52,12 +59,22 @@ suite "Reranker":
     ]
     var cache = initTable[uint64, HashSet[string]]()
     cache[0'u64] = initHashSet[string]()
-    for t in tokenize("aaa"):
+    for t in reranker.tokenize("aaa"):
       cache[0'u64].incl(t)
     cache[1'u64] = initHashSet[string]()
-    for t in tokenize("bbb"):
+    for t in reranker.tokenize("bbb"):
       cache[1'u64].incl(t)
+    var lowerTextCache = initTable[uint64, string]()
+    lowerTextCache[0'u64] = "aaa"
+    lowerTextCache[1'u64] = "bbb"
+    var lexical = LexicalIndex(mu: 2000.0)
+    var corpus = CorpusIndex()
     let cfg = defaultEngineConfig()
-    rerank("xyz", candidates, cache, cfg)
+    rerank("xyz", candidates, cache, lowerTextCache, lexical, corpus, cfg)
     check candidates[0].id == 1'u64
-    check candidates[0].score == 0.5
+    check candidates[0].score > 0.5
+
+  test "exact phrase ratio finds contiguous matches":
+    let qBigrams = buildBigrams(reranker.tokenize("treatment resistant"))
+    let ratio = exactPhraseRatio(qBigrams, "treatment resistant depression")
+    check ratio == 1.0

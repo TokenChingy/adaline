@@ -30,7 +30,9 @@ type
     rrfK*: int
 
 
-    rerankCoverageWeight*: float
+    rerankIdfWeight*: float
+    rerankPhraseWeight*: float
+    rerankLenWeight*: float
 
     chunkSaturationThreshold*: float
 
@@ -59,7 +61,9 @@ proc defaultEngineConfig*(): EngineConfig =
     lshRows: 2,
     dirichletMu: 2000.0,
     rrfK: 10,
-    rerankCoverageWeight: 0.5,
+    rerankIdfWeight: 0.30,
+    rerankPhraseWeight: 0.20,
+    rerankLenWeight: 0.05,
     chunkSaturationThreshold: 0.6,
     queryProbeMultiplier: 2.0,
     maxTokenFeatures: 12,
