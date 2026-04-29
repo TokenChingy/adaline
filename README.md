@@ -313,6 +313,9 @@ The `searchDense` use-case encodes the query vector to a fingerprint, queries LS
 # Build CLI
 nimble release
 
+# Run tests
+nimble test
+
 # Insert
 ./adaline insert "The quick brown fox"
 ./adaline insert "Nim is a systems programming language"
