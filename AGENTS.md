@@ -33,10 +33,13 @@ domain/services/    <- Pure domain orchestration. Each operation lives in
  infrastructure/    <- Concrete adapters: mmapped storage (WAL, fingerprint store,
                        chunks mapping store). Imported by domain services when needed.
 bindings/           <- Python bindings (nimpy) exposing the same use cases.
-benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark,
-                       Python vision suite, `vision_bench.nim` (Nim dense-vector
-                       benchmark using insertDense / searchDense use-cases).
+benchmarks/         <- BEIR benchmark runner, BEIR lane-ablation runner,
+                       LongMemEval runner, CRUD benchmark, Python vision suite,
+                       `vision_bench.nim` (Nim dense-vector benchmark using
+                       insertDense / searchDense use-cases).
 tests/              <- Unit tests mirroring the folder layout.
+                       29 suites covering all domain algorithms, entities,
+                       services, and use_cases (including dense-vector pipeline).
 adaline.nim         <- The CLI entry point.
 ```
 
@@ -67,7 +70,7 @@ Use Cases ← Domain ← Infrastructure
 - **Dense-vector encoding:** `domain/algorithms/dense_encoder.nim` provides `encodeDense()` for converting L2-normalised float32 vectors into fingerprints via k-WTA, enabling vision / signal / tabular use cases.
 - **Adaptive fingerprint compression:** Three formats selected by active-segment count: sparse (≤20), bitmap (21–157), or raw (≥158). Text SDR fingerprints average ~220 bytes with top-K filtering; dense-vector fingerprints compress to ~19 bytes.
 - **Top-K token filtering:** Documents encode only the top-K tokens by IDF (default 12). This cuts fingerprint size to ~220 bytes (~83% savings) while improving nDCG@10 and MRR by ~4 points on SciFact.
-- **LSH query optimizations:** Epoch-array dedup (replaces `HashSet` per query), AND-construction (min 2 band hits), fast-path `bandHash` (unrolled, no `mod` for default config), in-place `removeLsh`, and pre-sized table on `loadLsh`. These optimizations more than doubled SciFact query throughput (125 → 277 q/s) with no recall loss.
+- **LSH query optimizations:** Epoch-array dedup (replaces `HashSet` per query), AND-construction (min 2 band hits), fast-path `bandHash` (unrolled, no `mod` for default config), in-place `removeLsh`, and pre-sized table on `loadLsh`. These optimizations more than doubled SciFact query throughput (125 → 273 q/s) with no recall loss.
 - **Lexical lane `seq[float]` scoring:** Replaced `Table[uint64, float]` docScores with a dense `seq[float>` + touched-list, eliminating hash-table overhead in the posting-loop hot path.
 - **Pre-tokenized rerank cache:** Added `tokenCache: Table[uint64, HashSet[string]]` and `lowerTextCache: Table[uint64, string]` to `MemoryService`, populated on insert/update. Reranker does HashSet lookups and substring searches on pre-lowercased text instead of per-query tokenization.
 - **Score-aware RRF (RRF-S):** `mergeRrf` multiplies each reciprocal-rank contribution by the normalised raw lane score, preserving RRF's robustness while using score magnitude as a tie-breaker.

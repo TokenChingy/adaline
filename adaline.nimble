@@ -37,9 +37,23 @@ task test, "Compile and run all tests":
     "tests/domain/test_chunk.nim",
     "tests/domain/test_config.nim",
     "tests/domain/test_memory.nim",
+    "tests/domain/test_dense_encoder.nim",
+    "tests/domain/test_types.nim",
+    "tests/domain/test_checkpoint.nim",
+    "tests/domain/test_delete.nim",
+    "tests/domain/test_delete_dense.nim",
+    "tests/domain/test_init.nim",
+    "tests/domain/test_insert.nim",
+    "tests/domain/test_insert_dense.nim",
+    "tests/domain/test_search.nim",
+    "tests/domain/test_search_dense.nim",
+    "tests/domain/test_update.nim",
     "tests/use_cases/test_insert_memory.nim",
     "tests/use_cases/test_search_memories.nim",
     "tests/use_cases/test_update_memory.nim",
-    "tests/use_cases/test_delete_memory.nim"
+    "tests/use_cases/test_delete_memory.nim",
+    "tests/use_cases/test_insert_dense.nim",
+    "tests/use_cases/test_search_dense.nim",
+    "tests/use_cases/test_delete_dense.nim"
   ]:
     exec "nim c -r " & f

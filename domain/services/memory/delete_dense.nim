@@ -7,12 +7,17 @@ import ./types
 import ../../entities/fingerprint
 import ../../algorithms/fingerprint_lsh
 import ../../../infrastructure/mmapped_storage
+import std/tables
 
 export types
 
 proc deleteDense*(service: var MemoryService; memoryId: uint64) =
   # Guard: don't delete text memories or chunks via dense path
   if service.textCache.hasKey(memoryId) or service.chunkToParent.hasKey(memoryId):
+    return
+
+  # Guard: ID must be within allocated index range
+  if memoryId >= service.storage.fpIdxCapacity:
     return
 
   var fp: Fingerprint
