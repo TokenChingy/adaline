@@ -224,30 +224,42 @@ Each lane contributes roughly half of the final results independently.
 
 ## FIQA
 
-57K financial QA pairs from the BEIR collection.
+57,638 financial QA documents. 6,648 queries (648 with qrels).
 
 ### Indexing
 
 | Statistic | Value |
 |-----------|-------|
-| Total insert time | 10.0 s |
-| Insert throughput | 5,677 docs/s |
-| Insert P50 | 0.14 ms |
-| Insert P95 | 0.32 ms |
+| Total insert time | 11.26 s |
+| Insert throughput | 5,117 docs/s |
+| Insert P50 | 0.16 ms |
+| Insert P95 | 0.33 ms |
+| Insert P99 | 0.96 ms |
 
 ### Query (top-100)
 
 | Statistic | Value |
 |-----------|-------|
-| Query throughput | 14.6 q/s |
-| Query P50 | 66 ms |
-| Query P95 | 82 ms |
+| Query throughput | 27.6 q/s |
+| Query P50 | 36.8 ms |
+| Query P95 | 38.6 ms |
+| Query P99 | 39.7 ms |
 
-### Retrieval Quality
+### Retrieval Quality (648 judged queries)
 
 | Metric | Value |
 |--------|-------|
-| nDCG@10 | 0.1680 |
+| Recall@1 | 10.13% |
+| Recall@5 | 21.40% |
+| Recall@10 | 26.28% |
+| Recall@100 | 44.54% |
+| Precision@1 | 19.91% |
+| Precision@5 | 8.89% |
+| Precision@10 | 5.73% |
+| Precision@100 | 1.05% |
+| MRR | 0.2733 |
+| MAP | 0.1694 |
+| nDCG@10 | 0.2112 |
 
 ---
 
@@ -341,9 +353,25 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 
 ## LongMemEval-S
 
-500 questions. Each has ~53 conversation sessions (~115K tokens).
+500 questions. Each has ~48 conversation sessions on average (~47.7 sessions, ~95K tokens). Total sessions indexed: 23,867.
 
 > **Note:** The numbers below measure only the **retrieval component** — whether the correct session(s) appear in the top-k results. The official LongMemEval benchmark is a generation + LLM-as-judge task that scores answer correctness, not retrieval recall. These results show how well Adaline retrieves relevant context, but they are not directly comparable to published LongMemEval accuracy scores.
+
+### Indexing
+
+| Statistic | Value |
+|-----------|-------|
+| Total insert time | 46.71 s |
+| Insert throughput | 511.0 sessions/s |
+| Avg per question | 93.4 ms |
+
+### Query (top-10)
+
+| Statistic | Value |
+|-----------|-------|
+| Query throughput | 752 q/s |
+| Query P50 | 1.20 ms |
+| Query P95 | 2.48 ms |
 
 ### Retrieval Quality
 
@@ -353,23 +381,24 @@ nim c -d:release -o:benchmarks/vision_bench benchmarks/vision_bench.nim
 | R@5 | 94.80% |
 | R@10 | 96.20% |
 
-### Per-Category R@5
+### Per-Category Breakdown
 
-| Category | R@5 | Count |
-|----------|-----|-------|
-| knowledge-update | 98.72% | 77/78 |
-| single-session-assistant | 100.00% | 56/56 |
-| single-session-user | 95.71% | 67/70 |
-| multi-session | 95.49% | 127/133 |
-| temporal-reasoning | 93.98% | 125/133 |
-| single-session-preference | 73.33% | 22/30 |
+| Category | R@1 | R@5 | R@10 | Count |
+|----------|-----|-----|------|-------|
+| knowledge-update | 93.59% | 98.72% | 98.72% | 78 |
+| single-session-assistant | 98.21% | 100.00% | 100.00% | 56 |
+| single-session-user | 90.00% | 95.71% | 97.14% | 70 |
+| multi-session | 84.96% | 95.49% | 96.99% | 133 |
+| temporal-reasoning | 78.95% | 93.98% | 95.49% | 133 |
+| single-session-preference | 30.00% | 73.33% | 80.00% | 30 |
 
 ### Notes
 
 - Correct session is in the top 5 for 474/500 questions.
 - Knowledge updates are near-perfect (98.7% R@5).
 - Single-session preference is the weak spot (73.3%). Preferences are often implicit and require inference beyond literal text matching.
-- Conditional chunking is essential here. Sessions average ~115K tokens, which would saturate a single fingerprint.
+- Conditional chunking is essential here. Sessions average ~95K tokens, which would saturate a single fingerprint.
+- Query latency is extremely low (~1.2 ms P50) because each question searches a small per-question haystack (~48 sessions).
 
 ---
 
@@ -414,9 +443,9 @@ Current defaults use 80 LSH bands with 2 rows each, providing full coverage of a
 - **SciFact:** 4,669 docs/s insert, 273 q/s query, 87.72% R@100, nDCG@10 = 0.6535
 - **NFCorpus:** 4,646 docs/s insert, 460 q/s query
 - **ArguAna:** 5,216 docs/s insert, 95 q/s query
-- **FIQA:** 5,677 docs/s insert, 14.6 q/s query
+- **FIQA:** 5,117 docs/s insert, 27.6 q/s query
 
-More bands increase candidate recall but grow the index; fewer bands reduce memory at the cost of recall. For corpora under ~10K docs, 80 bands is the practical sweet spot. At 57K docs (FIQA), brute-force Jaccard over LSH candidates becomes the bottleneck, dropping query throughput to ~15 q/s.
+More bands increase candidate recall but grow the index; fewer bands reduce memory at the cost of recall. For corpora under ~10K docs, 80 bands is the practical sweet spot. At 57K docs (FIQA), brute-force Jaccard over LSH candidates becomes the bottleneck, dropping query throughput to ~28 q/s.
 
 ### Query Performance
 

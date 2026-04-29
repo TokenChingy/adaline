@@ -369,7 +369,7 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 | SciFact | 5,183 docs | 4,669 docs/s | 273 q/s | 0.654 | 72.1% |
 | NFCorpus | 3,633 docs | 4,646 docs/s | 460 q/s | 0.286 | 11.5% |
 | ArguAna | 8,674 docs | 5,216 docs/s | 95 q/s | 0.337 | 50.0% |
-| FIQA | 57K docs | 5,677 docs/s | 14.6 q/s | 0.168 | — |
+| FIQA | 57K docs | 5,117 docs/s | 27.6 q/s | 0.211 | 21.4% |
 | LongMemEval-S | 500 questions | — | — | — | 94.8% |
 | Vision (CIFAR-10 / MobileNetV2) | 200 vectors | — | 0.22 ms/q | — | — |
 
@@ -377,8 +377,8 @@ nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim
 * **SciFact:** Recall@1 = 52.2%, R@100 = 87.7%, MRR = 0.62. P50 latency ~3.7 ms for top-100.
 * **NFCorpus:** Recall@1 = 5.2%, Precision@1 = 38.4%, MRR = 0.49. P50 latency ~2.0 ms.
 * **ArguAna:** Recall@1 = 0%, R@100 = 97.3%, MRR = 0.23. P50 latency ~9.3 ms. (Adversarial counter-argument retrieval; lexical lane carries most signal).
-* **FIQA:** 57K financial QA pairs. Query latency ~66 ms for top-100.
-* **LongMemEval-S:** R@1 = 83.6%, R@5 = 94.8%. (Conversational memory retrieval).
+* **FIQA:** Recall@1 = 10.1%, R@100 = 44.5%, MRR = 0.27, nDCG@10 = 0.21. P50 latency ~37 ms for top-100.
+* **LongMemEval-S:** R@1 = 83.6%, R@5 = 94.8%. P50 latency ~1.2 ms per question.
 * **Vision (CIFAR-10 / MobileNetV2):** 1-shot classification 44.4% dense vs 42.2% sparse. 20-shot converges to 62.6% dense vs 61.8% sparse. Open-set AUROC 0.578.
 
 ---
