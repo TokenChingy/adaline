@@ -37,6 +37,9 @@ benchmarks/         <- BEIR benchmark runner, LongMemEval runner, CRUD benchmark
                        Python vision suite, `vision_bench.nim` (Nim dense-vector
                        benchmark using insertDense / searchDense use-cases).
 tests/              <- Unit tests mirroring the folder layout.
+ui/                 <- Desktop UI: Nim webview backend (`ui/backend.nim`) plus
+                       React frontend (`ui/frontend/`) built with Vite,
+                       TailwindCSS, and DaisyUI. Served via webview.h.
 adaline.nim         <- The CLI entry point.
 ```
 
@@ -64,6 +67,7 @@ Use Cases ← Domain ← Infrastructure
 - **Delete / Update:** `deleteMemory()` and `updateMemory()` remove entries from LSH and lexical indexes, then free the slot for reuse.
 - **Checkpoint:** `checkpoint()` serializes in-memory indexes to disk for fast restart
 - **Python bindings:** `bindings/adaline.nim` exposes `Engine` (insert, search, update, delete, stats, checkpoint) via nimpy. Build with `nimble python`.
+- **Desktop UI:** `adaline ui` launches a cross-platform webview window running a React frontend. The frontend communicates with the Nim backend via `window.external.invoke` JSON messages. Build with `nimble ui`.
 - **Dense-vector encoding:** `domain/algorithms/dense_encoder.nim` provides `encodeDense()` for converting L2-normalised float32 vectors into fingerprints via k-WTA, enabling vision / signal / tabular use cases.
 - **Adaptive fingerprint compression:** Three formats selected by active-segment count: sparse (≤20), bitmap (21–157), or raw (≥158). Text SDR fingerprints average ~220 bytes with top-K filtering; dense-vector fingerprints compress to ~19 bytes.
 - **Top-K token filtering:** Documents encode only the top-K tokens by IDF (default 12). This cuts fingerprint size to ~220 bytes (~83% savings) while improving nDCG@10 and MRR by ~4 points on SciFact.

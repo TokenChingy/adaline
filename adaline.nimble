@@ -9,6 +9,7 @@ bin           = @["adaline"]
 # Dependencies
 requires "nim >= 2.0.0"
 requires "nimpy >= 0.2.0"
+requires "webview >= 0.1.0"
 
 # Tasks
 task release, "Compile adaline CLI in release mode":
@@ -22,6 +23,10 @@ task benchmark, "Compile benchmarks in release mode":
   exec "nim c -d:release -o:benchmarks/beir benchmarks/beir.nim"
   exec "nim c -d:release -o:benchmarks/longmemeval benchmarks/longmemeval.nim"
   exec "nim c -d:release -o:benchmarks/vision benchmarks/vision.nim"
+
+task ui, "Build frontend and compile UI-enabled adaline":
+  exec "cd ui/frontend && npm install && npm run build"
+  exec "nim c -d:release -o:adaline adaline.nim"
 
 task test, "Compile and run all tests":
   for f in @[

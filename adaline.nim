@@ -12,6 +12,7 @@ import use_cases/insert_memory
 import use_cases/search_memories
 import use_cases/update_memory
 import use_cases/delete_memory
+import ui/backend
 
 const
   AppName = "Adaline"
@@ -30,6 +31,7 @@ Commands:
   delete <id>             Delete a memory by ID
   search <query> [k]      Search memories (default k=10)
   stats                   Show index statistics
+  ui                      Launch desktop UI
   help                    Show this help message
 
 Examples:
@@ -194,6 +196,8 @@ proc main() =
     cmdSearch(rest)
   of "stats":
     cmdStats()
+  of "ui":
+    runUi(getDataDir())
   of "help", "--help", "-h":
     printUsage()
   else:
